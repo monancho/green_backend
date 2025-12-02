@@ -4,6 +4,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import com.green.university.repository.model.Student;
 
+import java.util.Optional;
+
 /**
  * Spring Data JPA repository for {@link Student} entities.
  *
@@ -11,4 +13,6 @@ import com.green.university.repository.model.Student;
  */
 public interface StudentJpaRepository extends JpaRepository<Student, Integer> {
     // Additional query methods can be defined here if necessary
+    Optional<Student> findByIdAndNameAndEmail(Integer id, String name, String email);
+    Optional<Student> findByNameAndEmail(String name, String email);
 }

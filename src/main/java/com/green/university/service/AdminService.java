@@ -264,7 +264,7 @@ public class AdminService {
     @Transactional
     public List<Subject> createSubjectAndSyllabus(@Validated SubjectFormDto subjectFormDto) {
         // 강의실, 강의시간 중복 검사
-        List<Subject> subjectList = subjectJpaRepository.findByRoom_RoomIdAndSubDayAndSubYearAndSemester(
+        List<Subject> subjectList = subjectJpaRepository.findByRoom_IdAndSubDayAndSubYearAndSemester(
                 subjectFormDto.getRoomId(),
                 subjectFormDto.getSubDay(),
                 subjectFormDto.getSubYear(),
@@ -354,7 +354,7 @@ public class AdminService {
         subjectFormDto.setSemester(subject.getSemester());
 
         // 강의실, 강의시간 중복 검사
-        List<Subject> subjectList = subjectJpaRepository.findByRoom_RoomIdAndSubDayAndSubYearAndSemester(
+        List<Subject> subjectList = subjectJpaRepository.findByRoom_IdAndSubDayAndSubYearAndSemester(
                 subjectFormDto.getRoomId(),
                 subjectFormDto.getSubDay(),
                 subjectFormDto.getSubYear(),

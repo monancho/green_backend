@@ -29,13 +29,13 @@ public class BreakAppService {
     @Autowired
     private StudentJpaRepository studentJpaRepository;
 
-	@Autowired
-	private StuStatService stuStatService;
+    @Autowired
+    private StuStatService stuStatService;
 
-	/**
-	 * @param breakAppFormDto 휴학 신청
-	 */
-	@Transactional
+    /**
+     * @param breakAppFormDto 휴학 신청
+     */
+    @Transactional
     public void createBreakApp(BreakAppFormDto breakAppFormDto) {
         // 이미 처리중인 휴학 신청 내역이 있다면 신청 불가능
         List<BreakApp> existingList = readByStudentId(breakAppFormDto.getStudentId());
@@ -67,10 +67,10 @@ public class BreakAppService {
         breakAppJpaRepository.save(newApp);
     }
 
-	/**
-	 * @param studentId 해당 학생의 휴학 신청 내역 조회
-	 */
-	@Transactional
+    /**
+     * @param studentId 해당 학생의 휴학 신청 내역 조회
+     */
+    @Transactional
     public List<BreakApp> readByStudentId(Integer studentId) {
         // find all by student id via JPA. If no custom method, filter in memory
         return breakAppJpaRepository.findAll().stream()
@@ -78,29 +78,29 @@ public class BreakAppService {
                 .collect(Collectors.toList());
     }
 
-	/**
-	 * @param status 처리하지 않은 휴학 신청 내역 조회 (교직원용)
-	 */
-	@Transactional
+    /**
+     * @param status 처리하지 않은 휴학 신청 내역 조회 (교직원용)
+     */
+    @Transactional
     public List<BreakApp> readByStatus(String status) {
         return breakAppJpaRepository.findAll().stream()
                 .filter(b -> b.getStatus() != null && b.getStatus().equals(status))
                 .collect(Collectors.toList());
     }
 
-	/**
-	 * @param id 특정 휴학 신청서 조회
-	 */
-	@Transactional
+    /**
+     * @param id 특정 휴학 신청서 조회
+     */
+    @Transactional
     public BreakApp readById(Integer id) {
         return breakAppJpaRepository.findById(id)
                 .orElseThrow(() -> new CustomRestfullException("휴학 신청 내역을 찾을 수 없습니다.", HttpStatus.BAD_REQUEST));
     }
 
-	/**
-	 * 아직 처리되지 않은 휴학 신청 취소 (학생)
-	 */
-	@Transactional
+    /**
+     * 아직 처리되지 않은 휴학 신청 취소 (학생)
+     */
+    @Transactional
     public void deleteById(Integer id) {
         // 처리중 상태인지 확인
         BreakApp breakAppEntity = readById(id);
@@ -110,10 +110,10 @@ public class BreakAppService {
         breakAppJpaRepository.deleteById(id);
     }
 
-	/**
-	 * 휴학 신청 처리 (교직원)
-	 */
-	@Transactional
+    /**
+     * 휴학 신청 처리 (교직원)
+     */
+    @Transactional
     public void updateById(Integer id, String status) {
         BreakApp breakAppEntity = readById(id);
         breakAppEntity.setStatus(status);

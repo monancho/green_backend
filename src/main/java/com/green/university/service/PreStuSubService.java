@@ -47,13 +47,17 @@ public class PreStuSubService {
     @Transactional(readOnly = true)
     public List<PreStuSub> readPreStuSubList(Integer studentId) {
 
-        List<PreStuSub> preStuSubList = preStuSubJpaRepository.findByStudentIdAndSubject_SubYearAndSubject_Semester(
-                studentId,
-                Define.CURRENT_YEAR,
-                Define.CURRENT_SEMESTER
-        );
+        List<PreStuSub> allPreStuSubs = preStuSubJpaRepository.findByIdStudentId(studentId);
 
-        return preStuSubList;
+        // 현재 학기만 필터링
+        return allPreStuSubs.stream()
+                .filter(ps -> {
+                    Subject subject = subjectJpaRepository.findById(ps.getSubjectId()).orElse(null);
+                    return subject != null
+                            && subject.getSubYear().equals(Define.CURRENT_YEAR)
+                            && subject.getSemester().equals(Define.CURRENT_SEMESTER);
+                })
+                .collect(Collectors.toList());
     }
 
 	// 학생의 예비 수강신청 내역 추가

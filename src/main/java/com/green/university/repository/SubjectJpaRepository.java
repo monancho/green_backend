@@ -16,7 +16,7 @@ import java.util.List;
 public interface SubjectJpaRepository extends JpaRepository<Subject, Integer> {
     // 추가적인 조회 메서드는 필요 시 선언
 
-    List<Subject> findByRoom_RoomIdAndSubDayAndSubYearAndSemester(String roomId, String subDay, Integer subYear, Integer semester);
+    List<Subject> findByRoom_IdAndSubDayAndSubYearAndSemester(String roomId, String subDay, Integer subYear, Integer semester);
 
     List<Subject> findByProfessor_Id(Integer professorId);
 

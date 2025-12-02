@@ -66,8 +66,6 @@ public class StuSubService {
         );
     }
 
-	// 학생의 수강신청 내역 추가
-    // 학생의 수강신청 내역 추가
     @Transactional
     public void createStuSub(Integer studentId, Integer subjectId) {
 
@@ -75,17 +73,15 @@ public class StuSubService {
         Subject targetSubject = subjectJpaRepository.findById(subjectId)
                 .orElseThrow(() -> new CustomRestfullException("과목 정보를 찾을 수 없습니다.", HttpStatus.NOT_FOUND));
 
-        // 신청 대상 과목의 정원이 다 찼다면 신청 불가
-        if (targetSubject.getNumOfStudent() >= targetSubject.getCapacity()) {
-            throw new CustomRestfullException("정원이 초과되었습니다.", HttpStatus.INTERNAL_SERVER_ERROR);
-        }
+        // 현재 총 신청 학점 - PreStuSub에서 Subject 조회
+        List<PreStuSub> preStuSubs = preStuSubJpaRepository.findByIdStudentId(studentId);
 
-        // 현재 총 신청 학점
-        List<StuSub> stuSubs = stuSubJpaRepository.findByStudentIdAndSubject_SubYearAndSubject_Semester(
-                studentId, Define.CURRENT_YEAR, Define.CURRENT_SEMESTER);
-
-        int sumGrades = stuSubs.stream()
-                .mapToInt(ss -> ss.getSubject() != null ? ss.getSubject().getGrades() : 0)
+        int sumGrades = preStuSubs.stream()
+                .map(ps -> subjectJpaRepository.findById(ps.getSubjectId()).orElse(null))
+                .filter(subject -> subject != null
+                        && subject.getSubYear().equals(Define.CURRENT_YEAR)
+                        && subject.getSemester().equals(Define.CURRENT_SEMESTER))
+                .mapToInt(Subject::getGrades)
                 .sum();
 
         StuSubSumGradesDto stuSubSumGradesDto = new StuSubSumGradesDto();
@@ -94,39 +90,25 @@ public class StuSubService {
         // 최대 수강 가능 학점을 넘지 않는지 확인
         StuSubUtil.checkSumGrades(targetSubject, stuSubSumGradesDto);
 
-        // 해당 학생의 수강 신청 내역 시간표
-        List<StuSubDayTimeDto> dayTimeList = stuSubs.stream()
-                .map(ss -> {
-                    Subject subject = ss.getSubject();
-                    if (subject == null) return null;
-
+        // 해당 학생의 예비 수강 신청 내역 시간표
+        List<StuSubDayTimeDto> dayTimeList = preStuSubs.stream()
+                .map(ps -> subjectJpaRepository.findById(ps.getSubjectId()).orElse(null))
+                .filter(subject -> subject != null)
+                .map(subject -> {
                     StuSubDayTimeDto dto = new StuSubDayTimeDto();
                     dto.setSubDay(subject.getSubDay());
                     dto.setStartTime(subject.getStartTime());
                     dto.setEndTime(subject.getEndTime());
                     return dto;
                 })
-                .filter(dto -> dto != null)
                 .collect(Collectors.toList());
 
         // 현재 학생의 시간표와 겹치지 않는지 확인
         StuSubUtil.checkDayTime(targetSubject, dayTimeList);
 
         // 수강신청 내역 추가
-        StuSub stuSub = new StuSub();
-        Student student = studentJpaRepository.findById(studentId)
-                .orElseThrow(() -> new CustomRestfullException("학생 정보를 찾을 수 없습니다.", HttpStatus.NOT_FOUND));
-        stuSub.setStudent(student);
-        stuSub.setSubject(targetSubject);
-
-        StuSub savedStuSub = stuSubJpaRepository.save(stuSub);
-
-        // 수강 상세 내역에도 데이터 추가
-        StuSubDetail stuSubDetail = new StuSubDetail();
-        stuSubDetail.setId(savedStuSub.getId());
-        stuSubDetail.setStudentId(studentId);
-        stuSubDetail.setSubjectId(subjectId);
-        stuSubDetailJpaRepository.save(stuSubDetail);
+        PreStuSub preStuSub = new PreStuSub(studentId, subjectId);
+        preStuSubJpaRepository.save(preStuSub);
 
         // 해당 강의 현재인원 +1
         subjectService.updatePlusNumOfStudent(subjectId);

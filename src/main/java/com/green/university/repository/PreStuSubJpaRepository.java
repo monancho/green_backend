@@ -31,7 +31,7 @@ public interface PreStuSubJpaRepository extends JpaRepository<PreStuSub, PreStuS
      */
     void deleteByIdStudentIdAndIdSubjectId(Integer studentId, Integer subjectId);
 
-    List<PreStuSub> findByStudentIdAndSubject_SubYearAndSubject_Semester(Integer studentId, Integer subYear, Integer semester);
+//    List<PreStuSub> findByStudentIdAndSubject_SubYearAndSubject_Semester(Integer studentId, Integer subYear, Integer semester);
 
     List<PreStuSub> findByIdStudentId(Integer studentId);
 
