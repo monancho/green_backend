@@ -70,6 +70,7 @@ public class GradeController {
     @PostMapping("/read")
     public ResponseEntity<Map<String, Object>> readGradeProc(@RequestParam String type,
                                                              @RequestParam int subYear, @RequestParam int sesmeter) {
+        System.out.println("=== GradeController.thisSemester 진입 ===");
         PrincipalDto principal = (PrincipalDto) session.getAttribute(Define.PRINCIPAL);
         List<Integer> yearList = gradeService.readGradeYearByStudentId(principal.getId());
         List<Integer> semesterList = gradeService.readGradeSemesterByStudentId(principal.getId());
