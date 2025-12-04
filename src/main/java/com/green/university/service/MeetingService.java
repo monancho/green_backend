@@ -223,7 +223,7 @@ public class MeetingService {
         dto.setStartAt(start);
         dto.setEndAt(end);
         dto.setStatus(meeting.getStatus());
-
+        dto.setUserId(principal.getId());
         // PrincipalDto에서 이름/역할 가져와서 표기 이름 구성
         dto.setUserRole(principal.getUserRole());
         dto.setDisplayName(principal.getName() + " (" + principal.getUserRole() + ")");
