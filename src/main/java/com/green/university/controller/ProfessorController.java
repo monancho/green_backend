@@ -2,6 +2,8 @@ package com.green.university.controller;
 
 import java.util.List;
 
+import com.green.university.dto.response.StuSubResponseDto;
+import com.green.university.dto.response.SubjectPeriodForProfessorDto;
 import com.green.university.dto.response.SyllabusResponseDto;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -53,11 +55,11 @@ public class ProfessorController {
     public ResponseEntity<Map<String, Object>> subjectList(Authentication authentication) {
         Integer professorId = Integer.parseInt(authentication.getName());
 
-        List<Integer> semesterList = professorService.selectSemester(professorId);
+        List<SubjectPeriodForProfessorDto> semesterList = professorService.selectSemester(professorId);
 
         // 현재 학기 강의 조회
         List<Subject> subjectList = professorService.selectSubjectBySemester(
-                new com.green.university.dto.response.SubjectPeriodForProfessorDto(
+                new SubjectPeriodForProfessorDto(
                         professorId,
                         Define.CURRENT_YEAR,
                         Define.CURRENT_SEMESTER
@@ -79,11 +81,11 @@ public class ProfessorController {
             Authentication authentication) {
 
         Integer professorId = Integer.parseInt(authentication.getName());
-        List<Integer> semesterList = professorService.selectSemester(professorId);
+        List<SubjectPeriodForProfessorDto> semesterList = professorService.selectSemester(professorId);
 
         String[] strs = period.split("year");
         List<Subject> subjectList = professorService.selectSubjectBySemester(
-                new com.green.university.dto.response.SubjectPeriodForProfessorDto(
+                new SubjectPeriodForProfessorDto(
                         professorId,
                         Integer.parseInt(strs[0]),
                         Integer.parseInt(strs[1])
@@ -101,7 +103,7 @@ public class ProfessorController {
      */
     @GetMapping("/subject/{subjectId}")
     public ResponseEntity<Map<String, Object>> subjectStudentList(@PathVariable Integer subjectId) {
-        List<StuSub> studentList = professorService.selectBySubjectId(subjectId);
+        List<StuSubResponseDto> studentList = professorService.selectBySubjectId(subjectId);
         Subject subject = professorService.selectSubjectById(subjectId);
 
         Map<String, Object> body = new HashMap<>();

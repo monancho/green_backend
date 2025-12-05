@@ -219,36 +219,38 @@ public class SubjectService {
 	/**
 	 * @return 강의 시간표에서 필터링할 때 출력할 강의
 	 */
-	@Transactional
-	public List<SubjectDto> readSubjectListSearchByCurrentSemester(CurrentSemesterSubjectSearchFormDto dto) {
-        // 현재 학기 강의 목록을 먼저 가져와서 추가 조건(type, deptId, name)으로 필터링
+    @Transactional
+    public List<SubjectDto> readSubjectListSearchByCurrentSemester(CurrentSemesterSubjectSearchFormDto dto) {
         List<SubjectDto> filtered = readSubjectListByCurrentSemester();
+        System.out.println("현재 학기 전체 강의 개수: " + filtered.size());
+
         Stream<SubjectDto> stream = filtered.stream();
-        if (dto.getType() != null && !dto.getType().isEmpty()) {
+
+        if (dto.getType() != null && !dto.getType().isEmpty() && !dto.getType().equals("전체")) {
             stream = stream.filter(s -> s.getType() != null && s.getType().equals(dto.getType()));
         }
-        if (dto.getDeptId() != null) {
+
+        if (dto.getDeptId() != null && dto.getDeptId() != -1) {
             stream = stream.filter(s -> dto.getDeptId().equals(s.getDeptId()));
         }
+
         if (dto.getName() != null && !dto.getName().isEmpty()) {
             String name = dto.getName();
-            stream = stream.filter(s -> s.getName() != null && s.getName().contains(name));
+            System.out.println("강의명으로 필터링: " + name);
+            stream = stream.filter(s -> {
+                boolean match = s.getName() != null && s.getName().contains(name);
+                if (match) {
+                    System.out.println("매칭된 강의: " + s.getName());
+                }
+                return match;
+            });
         }
+
         List<SubjectDto> result = stream.collect(Collectors.toList());
-        // 페이징
-        if (dto.getPage() != null && dto.getPage() > 0) {
-            int page = dto.getPage();
-            int pageSize = 20;
-            int fromIndex = (page - 1) * pageSize;
-            int toIndex = Math.min(result.size(), fromIndex + pageSize);
-            if (fromIndex < result.size()) {
-                return result.subList(fromIndex, toIndex);
-            } else {
-                return java.util.Collections.emptyList();
-            }
-        }
+        System.out.println("최종 검색 결과: " + result.size());
+
         return result;
-	}
+    }
 
 	/**
 	 * 현재 인원을 1명 추가함

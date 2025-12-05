@@ -1,5 +1,6 @@
 package com.green.university.controller;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
@@ -123,14 +124,29 @@ public class AdminController {
 
 	// 강의 페이지
     @GetMapping("/subject")
-    public ResponseEntity<Map<String, Object>> subject(@RequestParam(defaultValue = "select") String crud) {
-        List<Subject> subjectList = adminService.readSubject();
-        List<College> collegeList = adminService.readCollege();
-        Map<String, Object> res = new HashMap<>();
-        res.put("crud", crud);
-        res.put("collegeList", collegeList.isEmpty() ? null : collegeList);
-        res.put("subjectList", subjectList.isEmpty() ? null : subjectList);
+    public ResponseEntity<Map<String, Object>> subject(
+            @RequestParam(defaultValue = "select") String crud,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String search) {
+
+        Map<String, Object> res = adminService.readSubjectWithPaging(crud, page, size, search);
         return ResponseEntity.ok(res);
+    }
+
+    @GetMapping("/subject/search")
+    public ResponseEntity<List<Subject>> searchSubject(@RequestParam String keyword) {  // "keyword" 파라미터 사용
+        System.out.println("검색 키워드: '" + keyword + "'");
+
+        if (keyword == null || keyword.trim().isEmpty()) {
+            return ResponseEntity.ok(Collections.emptyList());
+        }
+
+        List<Subject> subjects = adminService.searchSubjectByName(keyword.trim());
+
+        System.out.println("검색 결과 개수: " + subjects.size());
+
+        return ResponseEntity.ok(subjects);
     }
 
 	// 강의 입력 기능
