@@ -45,23 +45,55 @@ public class ProfessorService {
 
     // 교수가 맡은 과목들의 학기 검색
     @Transactional(readOnly = true)
-    public List<Integer> selectSemester(Integer id) {
+    public List<SubjectPeriodForProfessorDto> selectSemester(Integer id) {
         List<Subject> subjects = subjectJpaRepository.findByProfessor_Id(id);
 
-        // 학기만 추출 (중복 제거)
-        List<Integer> semesters = subjects.stream()
-                .map(Subject::getSemester)
+        // 년도와 학기를 함께 반환 (중복 제거)
+        // id는 null로 설정 (년도와 학기만 필요)
+        List<SubjectPeriodForProfessorDto> periods = subjects.stream()
+                .map(s -> new SubjectPeriodForProfessorDto(
+                        null,  // id는 필요 없음
+                        s.getSubYear(),
+                        s.getSemester()
+                ))
                 .distinct()
+                .sorted((a, b) -> {
+                    // 년도 내림차순, 같으면 학기 내림차순
+                    int yearCompare = b.getSubYear().compareTo(a.getSubYear());
+                    return yearCompare != 0 ? yearCompare : b.getSemester().compareTo(a.getSemester());
+                })
                 .collect(Collectors.toList());
 
-        return semesters;
+        return periods;
     }
 
 	// 년도와 학기, 교수 id를 이용하여 해당 과목의 정보 불러오기
-    @Transactional(readOnly = true)
-    public List<StuSub> selectBySubjectId(Integer subjectId) {
+    public List<StuSubResponseDto> selectBySubjectId(Integer subjectId) {
+
         List<StuSub> stuSubs = stuSubJpaRepository.findBySubjectId(subjectId);
-        return stuSubs;
+
+        return stuSubs.stream().map(stuSub -> {
+
+            Student st = stuSub.getStudent();
+
+            // 🔥 StuSubDetail 가져오기
+            StuSubDetail detail = stuSubDetailJpaRepository
+                    .findByStudentIdAndSubjectId(st.getId(), subjectId)
+                    .orElse(new StuSubDetail()); // null 방지
+
+            return new StuSubResponseDto(
+                    st.getId(),
+                    st.getName(),
+                    st.getDepartment().getName(),
+                    detail.getAbsent(),
+                    detail.getLateness(),
+                    detail.getHomework(),
+                    detail.getMidExam(),
+                    detail.getFinalExam(),
+                    detail.getConvertedMark()
+            );
+
+        }).toList();
     }
 
 	// 과목 id로 과목 Entity 불러오기
@@ -72,12 +104,7 @@ public class ProfessorService {
 		return subjectEntity;
 	}
 
-    /**
-     *
-     *
-     * @param subjectPeriodForProfessorDto
-     * @return SubjectForProfessorDto list
-     */
+    //
     @Transactional(readOnly = true)
     public List<Subject> selectSubjectBySemester(SubjectPeriodForProfessorDto subjectPeriodForProfessorDto) {
         List<Subject> subjects = subjectJpaRepository.findByProfessor_IdAndSubYearAndSemester(
@@ -89,7 +116,6 @@ public class ProfessorService {
     }
 
 	// 출결 및 성적 기입
-    // 출결 및 성적 기입
     @Transactional
     public void updateGrade(UpdateStudentGradeDto updateStudentGradeDto) {
 
@@ -97,7 +123,12 @@ public class ProfessorService {
         StuSubDetail stuSubDetail = stuSubDetailJpaRepository.findByStudentIdAndSubjectId(
                 updateStudentGradeDto.getStudentId(),
                 updateStudentGradeDto.getSubjectId()
-        ).orElseThrow(() -> new CustomRestfullException("요청을 처리하지 못했습니다.", HttpStatus.INTERNAL_SERVER_ERROR));
+        ).orElseThrow(() -> {
+            System.out.println("❌ StuSubDetail을 찾을 수 없음!");
+            return new CustomRestfullException("StuSubDetail을 찾을 수 없습니다.", HttpStatus.NOT_FOUND);
+        });
+
+        System.out.println("✅ StuSubDetail 찾음: " + stuSubDetail.getId());
 
         stuSubDetail.setAbsent(updateStudentGradeDto.getAbsent());
         stuSubDetail.setLateness(updateStudentGradeDto.getLateness());
@@ -107,16 +138,24 @@ public class ProfessorService {
         stuSubDetail.setConvertedMark(updateStudentGradeDto.getConvertedMark());
 
         stuSubDetailJpaRepository.save(stuSubDetail);
+        System.out.println("✅ StuSubDetail 저장 완료");
 
         // StuSub 업데이트
         StuSub stuSub = stuSubJpaRepository.findByStudentIdAndSubjectId(
                 updateStudentGradeDto.getStudentId(),
                 updateStudentGradeDto.getSubjectId()
-        ).orElseThrow(() -> new CustomRestfullException("요청을 처리하지 못했습니다.", HttpStatus.INTERNAL_SERVER_ERROR));
+        ).orElseThrow(() -> {
+            System.out.println("❌ StuSub을 찾을 수 없음!");
+            return new CustomRestfullException("StuSub을 찾을 수 없습니다.", HttpStatus.NOT_FOUND);
+        });
+
+        System.out.println("✅ StuSub 찾음");
 
         stuSub.setGrade(updateStudentGradeDto.getGrade());
 
         stuSubJpaRepository.save(stuSub);
+        System.out.println("✅ StuSub 저장 완료");
+        System.out.println("=== updateGrade 종료 ===");
     }
 
     // 강의계획서 조회

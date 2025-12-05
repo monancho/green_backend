@@ -1,6 +1,8 @@
 package com.green.university.repository;
 
 import com.green.university.repository.model.College;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import com.green.university.repository.model.Subject;
@@ -30,4 +32,14 @@ public interface SubjectJpaRepository extends JpaRepository<Subject, Integer> {
     List<Subject> findByCapacityLessThanNumOfStudent();
 
     List<Subject> findAllByOrderByIdAsc();
+
+    // 페이징
+    Page<Subject> findAllByOrderByIdAsc(Pageable pageable);
+
+    // 이름으로 검색 (LIKE 검색, 페이징 지원)
+    Page<Subject> findByNameContainingOrderByIdAsc(String name, Pageable pageable);
+
+    // 이름으로 검색 (LIKE 검색, 페이징 없음 - 수정용)
+    List<Subject> findByNameContainingOrderByIdAsc(String name);
+
 }

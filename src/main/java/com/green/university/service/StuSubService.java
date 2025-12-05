@@ -11,7 +11,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.green.university.dto.response.StuSubAppDto;
 import com.green.university.dto.response.StuSubDayTimeDto;
 import com.green.university.dto.response.StuSubSumGradesDto;
 import com.green.university.handler.exception.CustomRestfullException;
