@@ -19,4 +19,6 @@ public class MeetingJoinInfoResDto {
     private Integer userId;         // 실제 식별용
     private String displayName;     // Janus에 넘길 닉네임 (예: "홍길동(교수)")
     private String userRole;        // student / professor / staff
+
+    private String sessionKey;
 }

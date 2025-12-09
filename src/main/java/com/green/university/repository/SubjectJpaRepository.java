@@ -25,6 +25,8 @@ public interface SubjectJpaRepository extends JpaRepository<Subject, Integer> {
 
     List<Subject> findByProfessor_IdAndSubYearAndSemester(Integer professorId, Integer subYear, Integer semester);
 
+    List<Subject> findByProfessor_IdAndSubYear(Integer professorId, Integer subYear);
+
     @Query("SELECT s FROM Subject s WHERE s.capacity >= s.numOfStudent")
     List<Subject> findByCapacityGreaterThanEqualNumOfStudent();
 
@@ -42,4 +44,10 @@ public interface SubjectJpaRepository extends JpaRepository<Subject, Integer> {
     // 이름으로 검색 (LIKE 검색, 페이징 없음 - 수정용)
     List<Subject> findByNameContainingOrderByIdAsc(String name);
 
+    List<Subject> findByProfessor_IdAndSubDayAndSubYearAndSemester(
+            Integer professorId,
+            String subDay,
+            Integer subYear,
+            Integer semester
+    );
 }

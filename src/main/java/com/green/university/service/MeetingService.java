@@ -47,10 +47,106 @@ public class MeetingService {
         // 100000 ~ 999999 사이의 6자리 숫자
         return 100000 + random.nextInt(900000);
     }
+
     private Meeting findById(Integer meetingId) {
         return meetingJpaRepository.findById(meetingId)
                 .orElseThrow(() -> new CustomRestfullException("회의를 찾을 수 없습니다.", HttpStatus.NOT_FOUND));
     }
+
+    /**
+     * 공통: 현재 시간 기준으로 회의 상태 갱신
+     *
+     * - CANCELED / FINISHED 는 건들지 않음
+     * - endAt + 10분이 지나면 FINISHED
+     * - lastEmptyAt + 30분이 지나면 FINISHED
+     *
+     * @return true  : 이 호출에서 FINISHED 로 변경됨
+     *         false : 상태 변화 없음
+     */
+    private boolean refreshMeetingStatus(Meeting meeting) {
+        LocalDateTime now = LocalDateTime.now();
+
+        if (meeting.getEndAt() == null) {
+            // endAt 없는 회의는 자동 종료 로직을 안 탄다고 가정
+            return false;
+        }
+
+        LocalDateTime end = meeting.getEndAt().toLocalDateTime();
+        LocalDateTime lastEmpty = meeting.getLastEmptyAt() != null
+                ? meeting.getLastEmptyAt().toLocalDateTime()
+                : null;
+
+        // 이미 취소/종료된 회의면 더 이상 처리하지 않음
+        if (MeetingStatus.CANCELED.equals(meeting.getStatus())
+                || MeetingStatus.FINISHED.equals(meeting.getStatus())) {
+            return false;
+        }
+
+        boolean shouldFinish = false;
+
+        // 종료시간 + 10분이 지나면 자동 종료
+        if (now.isAfter(end.plusMinutes(10))) {
+            shouldFinish = true;
+        }
+
+        // 아무도 없는 상태(lastEmptyAt)로 30분 지났으면 자동 종료
+        if (lastEmpty != null && now.isAfter(lastEmpty.plusMinutes(30))) {
+            shouldFinish = true;
+        }
+
+        if (shouldFinish) {
+            meeting.setStatus(MeetingStatus.FINISHED);
+            meeting.setUpdatedAt(Timestamp.valueOf(now));
+            meetingJpaRepository.save(meeting);
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * 참가자 upsert + 세션 키 발급 + 회의 상태 IN_PROGRESS 로 전환
+     * - INSTANT / SCHEDULED 공통 사용
+     */
+    private String upsertParticipantAndIssueSessionKey(Meeting meeting, PrincipalDto principal) {
+        LocalDateTime now = LocalDateTime.now();
+
+        // 기존 참가자 있으면 재사용, 없으면 새로 생성
+        MeetingParticipant p = meetingParticipantJpaRepository
+                .findByMeeting_IdAndUser_Id(meeting.getId(), principal.getId())
+                .orElseGet(MeetingParticipant::new);
+
+        String newSessionKey = UUID.randomUUID().toString();
+
+        p.setMeeting(meeting);
+        p.setUser(userService.readUserById(principal.getId()));
+        p.setEmail(principal.getEmail());
+
+        // 이미 HOST로 등록된 경우(role이 이미 있을 경우) 그대로 유지
+        if (p.getRole() == null) {
+            p.setRole("PARTICIPANT");
+        }
+
+        p.setStatus("JOINED");
+        p.setJoinedAt(Timestamp.valueOf(now));
+        p.setLeftAt(null);
+
+        p.setSessionKey(newSessionKey);
+        p.setLastActiveAt(Timestamp.valueOf(now));
+
+        meetingParticipantJpaRepository.save(p);
+
+        // 회의 상태를 진행 중으로
+        if (!MeetingStatus.IN_PROGRESS.equals(meeting.getStatus())) {
+            meeting.setStatus(MeetingStatus.IN_PROGRESS);
+        }
+        meeting.setLastEmptyAt(null); // 방이 비어있지 않음
+        meeting.setUpdatedAt(Timestamp.valueOf(now));
+        meetingJpaRepository.save(meeting);
+
+        return newSessionKey;
+    }
+
     /**
      * 즉시 회의 생성.
      */
@@ -77,7 +173,7 @@ public class MeetingService {
 
         Meeting saved = meetingJpaRepository.save(meeting);
 
-        // 주최자를 참가자 테이블에도 HOST로 등록
+        // 주최자를 참가자 테이블에도 HOST로 등록 (초기 상태는 INVITED)
         MeetingParticipant hostParticipant = new MeetingParticipant();
         hostParticipant.setMeeting(saved);
         hostParticipant.setUser(host);
@@ -132,7 +228,7 @@ public class MeetingService {
 
         Meeting saved = meetingJpaRepository.save(meeting);
 
-        // 주최자를 참가자(HOST)로 등록
+        // 주최자를 참가자(HOST)로 등록 (초기 상태는 INVITED)
         MeetingParticipant hostParticipant = new MeetingParticipant();
         hostParticipant.setMeeting(saved);
         hostParticipant.setUser(host);
@@ -178,8 +274,7 @@ public class MeetingService {
      */
     @Transactional
     public void cancelMeeting(Integer meetingId, PrincipalDto principal) {
-        Meeting meeting = meetingJpaRepository.findById(meetingId)
-                .orElseThrow(() -> new CustomRestfullException("회의를 찾을 수 없습니다.", HttpStatus.NOT_FOUND));
+        Meeting meeting = findById(meetingId);
 
         if (!meeting.getHost().getId().equals(principal.getId())) {
             throw new CustomRestfullException("회의를 취소할 권한이 없습니다.", HttpStatus.FORBIDDEN);
@@ -199,41 +294,24 @@ public class MeetingService {
     /**
      * 회의 입장 정보 조회 (React + Janus에서 사용).
      * - 시간/상태 체크 후 roomNumber와 표시 이름을 내려준다.
+     * - INSTANT 회의면 이 시점에서 자동 참가 + 세션 키 발급
      */
     @Transactional
     public MeetingJoinInfoResDto readJoinInfo(Integer meetingId, PrincipalDto principal) {
-        Meeting meeting = meetingJpaRepository.findById(meetingId)
-                .orElseThrow(() -> new CustomRestfullException("회의를 찾을 수 없습니다.", HttpStatus.NOT_FOUND));
+        Meeting meeting = findById(meetingId);
 
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime start = meeting.getStartAt().toLocalDateTime();
-        LocalDateTime end = meeting.getEndAt().toLocalDateTime();
-        LocalDateTime lastEmpty = meeting.getLastEmptyAt() != null
-                ? meeting.getLastEmptyAt().toLocalDateTime()
-                : null;
+        // 1) 공통 상태 갱신
+        boolean finished = refreshMeetingStatus(meeting);
 
         if (MeetingStatus.CANCELED.equals(meeting.getStatus())) {
             throw new CustomRestfullException("이미 취소된 회의입니다.", HttpStatus.BAD_REQUEST);
         }
-
-        if (now.isAfter(end)) {
-            meeting.setStatus(MeetingStatus.FINISHED);
-            meeting.setUpdatedAt(Timestamp.valueOf(now));
-            meetingJpaRepository.save(meeting);
+        if (finished || MeetingStatus.FINISHED.equals(meeting.getStatus())) {
             throw new CustomRestfullException("이미 종료된 회의입니다.", HttpStatus.BAD_REQUEST);
         }
 
-        if (lastEmpty != null && now.isAfter(lastEmpty.plusMinutes(30))) {
-            meeting.setStatus(MeetingStatus.FINISHED);
-            meeting.setUpdatedAt(Timestamp.valueOf(now));
-            meetingJpaRepository.save(meeting);
-            throw new CustomRestfullException("모든 참가자가 나간 뒤 일정 시간이 지나 회의가 종료되었습니다.", HttpStatus.BAD_REQUEST);
-        }
-
-
-
-        // TODO: 참여자 권한 체크 (호스트 또는 참가자로 등록된 사용자만 허용하고 싶다면)
-        // List<MeetingParticipant> participants = meetingParticipantJpaRepository.findByMeeting_Id(meetingId);
+        LocalDateTime start = meeting.getStartAt().toLocalDateTime();
+        LocalDateTime end = meeting.getEndAt().toLocalDateTime();
 
         MeetingJoinInfoResDto dto = new MeetingJoinInfoResDto();
         dto.setMeetingId(meeting.getId());
@@ -243,68 +321,37 @@ public class MeetingService {
         dto.setEndAt(end);
         dto.setStatus(meeting.getStatus().name());
         dto.setUserId(principal.getId());
-        // PrincipalDto에서 이름/역할 가져와서 표기 이름 구성
         dto.setUserRole(principal.getUserRole());
         dto.setDisplayName(principal.getName() + " (" + principal.getUserRole() + ")");
+
+        // 🔹 인스턴트 회의면 => 여기서 바로 참가자 등록 + 세션 키 발급
+        if ("INSTANT".equals(meeting.getType())) {
+            String sessionKey = upsertParticipantAndIssueSessionKey(meeting, principal);
+            dto.setSessionKey(sessionKey);
+        } else {
+            dto.setSessionKey(null); // 예약 회의는 여기서 자동 참가하지 않음
+        }
 
         return dto;
     }
 
+    /**
+     * 예약 회의 등의 명시적 "참가하기" 버튼용
+     */
     @Transactional
     public String joinMeeting(Integer meetingId, PrincipalDto principal) {
         Meeting meeting = findById(meetingId);
+        boolean finished = refreshMeetingStatus(meeting);
 
-        if (meeting.getStatus() == MeetingStatus.CANCELED) {
+        if (MeetingStatus.CANCELED.equals(meeting.getStatus())) {
             throw new CustomRestfullException("취소된 회의입니다.", HttpStatus.BAD_REQUEST);
         }
-        if (meeting.getStatus() == MeetingStatus.FINISHED) {
+        if (finished || MeetingStatus.FINISHED.equals(meeting.getStatus())) {
             throw new CustomRestfullException("이미 종료된 회의입니다.", HttpStatus.BAD_REQUEST);
         }
 
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime endAt = meeting.getEndAt().toLocalDateTime();
-        if (now.isAfter(endAt.plusMinutes(10))) { // 예: 종료 시간 + 10분까지는 허용
-            throw new CustomRestfullException("회의 시간이 종료되었습니다.", HttpStatus.BAD_REQUEST);
-        }
-
-        if (meeting.getLastEmptyAt() != null) {
-            LocalDateTime lastEmptyAt = meeting.getLastEmptyAt().toLocalDateTime();
-            if (now.isAfter(lastEmptyAt.plusMinutes(30))) { // 30분 동안 아무도 없었으면 회의 끝난 것으로 간주
-                meeting.setStatus(MeetingStatus.FINISHED);
-                meeting.setUpdatedAt(Timestamp.valueOf(now));
-                meetingJpaRepository.save(meeting);
-                throw new CustomRestfullException("참가자가 없어 회의가 자동 종료되었습니다.", HttpStatus.BAD_REQUEST);
-            }
-        }
-        // 2) participant 찾기 (없으면 새로 생성)
-        MeetingParticipant p = meetingParticipantJpaRepository
-                .findByMeeting_IdAndUser_Id(meetingId, principal.getId())
-                .orElse(new MeetingParticipant());
-        // 새 세션 키 생성
-        String newSessionKey = UUID.randomUUID().toString();
-
-        p.setMeeting(meeting);
-        p.setUser(userService.readUserById(principal.getId()));
-        p.setEmail(principal.getEmail());
-        p.setRole(p.getRole() == null ? "PARTICIPANT" : p.getRole());
-        p.setStatus("JOINED");
-        p.setJoinedAt(Timestamp.valueOf(now));
-        p.setLeftAt(null);
-
-        p.setSessionKey(newSessionKey);
-        p.setLastActiveAt(Timestamp.valueOf(now));
-
-        meetingParticipantJpaRepository.save(p);
-
-        //  회의 상태 업데이트
-        if (!MeetingStatus.IN_PROGRESS.equals(meeting.getStatus())) {
-            meeting.setStatus(MeetingStatus.IN_PROGRESS);
-        }
-        meeting.setLastEmptyAt(null); // 이제 방은 비어 있지 않음
-        meeting.setUpdatedAt(Timestamp.valueOf(now));
-        meetingJpaRepository.save(meeting);
-
-        return newSessionKey;
+        // 🔹 공통 헬퍼 사용
+        return upsertParticipantAndIssueSessionKey(meeting, principal);
     }
 
     @Transactional
@@ -343,17 +390,12 @@ public class MeetingService {
         LocalDateTime now = LocalDateTime.now();
         Meeting meeting = findById(meetingId);
 
-        // 1) 회의 상태/시간 체크
-        LocalDateTime endAt = meeting.getEndAt().toLocalDateTime();
+        boolean finished = refreshMeetingStatus(meeting);
+
         if (MeetingStatus.CANCELED.equals(meeting.getStatus())) {
             return MeetingPingResDto.inactive("MEETING_CANCELED");
         }
-
-        if (now.isAfter(endAt.plusMinutes(10))) {
-            meeting.setStatus(MeetingStatus.FINISHED);
-            meeting.setUpdatedAt(Timestamp.valueOf(now));
-            meetingJpaRepository.save(meeting);
-
+        if (finished || MeetingStatus.FINISHED.equals(meeting.getStatus())) {
             return MeetingPingResDto.inactive("MEETING_FINISHED");
         }
 

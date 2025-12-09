@@ -55,7 +55,7 @@ public class MeetingParticipant {
      * - HOST  : 주최자 (Meeting.host와 동일)
      * - GUEST : 학생, 다른 교수 등
      */
-    @Column(name = "role", nullable = false, length = 10)
+    @Column(name = "role", nullable = false, length = 20)
     private String role;
 
     /**
