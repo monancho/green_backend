@@ -50,6 +50,12 @@ spring:
     ansi:
       enabled: always
 
+
+gemini:
+  api:
+    key:
+
+
  # Removed mybatis configuration since the project now uses Spring Data JPA
 
 jwt:
