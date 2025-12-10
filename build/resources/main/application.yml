@@ -1,8 +1,8 @@
 server:
   port: 8881
-  servlet: 
+  servlet:
     encoding:
-      charset: utf-8 
+      charset: utf-8
       force: true
   error:
     include-exception: true
@@ -33,7 +33,7 @@ spring:
   # Configure JPA/Hibernate settings
   jpa:
     hibernate:
-      ddl-auto: none
+      ddl-auto: update
     properties:
       hibernate:
         format_sql: true
@@ -50,13 +50,10 @@ spring:
     ansi:
       enabled: always
 
-
 gemini:
-  api:
-    key:AIzaSyCuwSZWm9xIUMPzEQoJg4nDbLFA
+  api: key:AIzaSyCuwSZWm9xIUMPzEQoJg4nDbLFA
 
-
- # Removed mybatis configuration since the project now uses Spring Data JPA
+  # Removed mybatis configuration since the project now uses Spring Data JPA
 
 jwt:
   secret: myScretKey0000fdafadsdfdsafdasffsafsafasfdfdfsdafafsasdyasdyasdasduasbdhafjkshfbahwefbakvbagkcvadsv

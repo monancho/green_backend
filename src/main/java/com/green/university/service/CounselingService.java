@@ -42,6 +42,9 @@ public class CounselingService {
     @Autowired
     private MeetingService meetingService;
 
+    @Autowired
+    private NotificationService notificationService;
+
     // ============= 공통 유틸/검증 =============
 
 
@@ -336,6 +339,17 @@ public class CounselingService {
         slot.setStatus(CounselingSlotStatus.RESERVED);
         slot.setUpdatedAt(Timestamp.valueOf(now));
         slotRepo.save(slot);
+
+        // 교수에게 알림 생성
+        String message = String.format("%s 학생이 %s에 상담 예약을 신청했습니다.",
+                student.getName(),
+                start.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+        notificationService.createNotification(
+                slot.getProfessor().getId(),
+                "RESERVATION_REQUEST",
+                message,
+                saved.getId()
+        );
 
         return toReservationDto(saved);
     }
@@ -635,6 +649,17 @@ public class CounselingService {
                 meetingId,
                 r.getStudent().getEmail(),
                 r.getStudent().getId()
+        );
+
+        // 학생에게 알림 생성
+        String message = String.format("%s 교수님이 %s에 상담 예약을 승인했습니다.",
+                slot.getProfessor().getName(),
+                slot.getStartAt().toLocalDateTime().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+        notificationService.createNotification(
+                r.getStudent().getId(),
+                "RESERVATION_APPROVED",
+                message,
+                r.getId()
         );
     }
 
