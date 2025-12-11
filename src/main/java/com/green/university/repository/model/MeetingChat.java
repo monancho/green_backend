@@ -12,6 +12,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 
 import lombok.Data;
+import org.hibernate.annotations.CreationTimestamp;
 
 /**
  * 회의방 텍스트 채팅 메시지 엔티티.
@@ -57,6 +58,7 @@ public class MeetingChat {
     /**
      * 전송 시각.
      */
+    @CreationTimestamp
     @Column(name = "sent_at", nullable = false)
     private Timestamp sentAt;
 

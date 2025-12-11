@@ -12,10 +12,11 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @Builder
 public class ChatMessageDto {
+    private Integer messageId;
+
     private Integer meetingId;
     private Integer userId;
     private String displayName;
-    private String type; // "CHAT", "JOIN", "LEAVE" 등
     private String message;
     private LocalDateTime sentAt;
 
