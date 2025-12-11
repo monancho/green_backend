@@ -1,10 +1,15 @@
 package com.green.university.service;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.green.university.repository.*;
 import com.green.university.repository.model.*;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,9 +49,7 @@ public class AdminService {
     private ProfessorJpaRepository professorJpaRepository;
 
 
-	/**
-	 * 단과대 입력 서비스
-	 */
+	// 단과대 입력 서비스
     @Transactional
     public void createCollege(@Validated CollegeFormDto collegeFormDto) {
         // 같은 이름 중복 검사(JPA)
@@ -62,18 +65,14 @@ public class AdminService {
         collegeJpaRepository.save(college);
     }
 
-	/**
-	 * 단과대 조회 서비스
-	 */
+	// 단과대 조회 서비스
     @Transactional
     public List<College> readCollege() {
         // JPA를 사용하여 전체 단과대 목록 조회
-        return collegeJpaRepository.findAll();
+        return collegeJpaRepository.findAllByOrderByIdAsc();
     }
 
-	/**
-	 * 단과대 삭제 서비스
-	 */
+	// 단과대 삭제 서비스
     public int deleteCollege(Integer id) {
         if (id == null) {
             return 0;
@@ -82,9 +81,7 @@ public class AdminService {
         return 1;
     }
 
-	/**
-	 * 학과 입력 서비스
-	 */
+	// 학과 입력 서비스
     @Transactional
     public void createDepartment(@Validated DepartmentFormDto departmentFormDto) {
         // 같은 학과 이름 중복 검사(JPA)
@@ -103,17 +100,13 @@ public class AdminService {
         departmentJpaRepository.save(department);
     }
 
-	/**
-	 * 학과 조회 서비스
-	 */
+	// 학과 조회 서비스
     public List<Department> readDepartment() {
         // JPA를 사용하여 전체 학과 목록 조회
-        return departmentJpaRepository.findAll();
+        return departmentJpaRepository.findAllByOrderByIdAsc();
     }
 
-	/**
-	 * 학과 삭제 서비스
-	 */
+	// 학과 삭제 서비스
     public int deleteDepartment(Integer collegeId) {
         if (collegeId == null) {
             return 0;
@@ -122,9 +115,7 @@ public class AdminService {
         return 1;
     }
 
-	/**
-	 * 학과 수정 서비스
-	 */
+	// 학과 수정 서비스
     public int updateDepartment(DepartmentFormDto departmentFormDto) {
         if (departmentFormDto.getId() == null) {
             return 0;
@@ -144,9 +135,7 @@ public class AdminService {
         }).orElse(0);
     }
 
-	/**
-	 * 단과대별 등록금 입력 서비스
-	 */
+	// 단과대별 등록금 입력 서비스
     @Transactional
     public void createCollTuit(@Validated CollTuitFormDto collTuitFormDto) {
         // 등록금 중복 입력 검사(JPA)
@@ -165,12 +154,10 @@ public class AdminService {
         collTuitJpaRepository.save(collTuit);
     }
 
-	/**
-	 * 단과대 등록금 조회 서비스
-	 */
+	// 단과대 등록금 조회 서비스
     public List<CollTuitFormDto> readCollTuit() {
         // JPA를 사용하여 등록금 목록 조회 후 DTO 변환
-        List<CollTuit> collTuition = collTuitJpaRepository.findAll();
+        List<CollTuit> collTuition = collTuitJpaRepository.findAllByOrderByCollegeIdAsc();
         List<CollTuitFormDto> dtos = new java.util.ArrayList<>();
         for (CollTuit ct : collTuition) {
             CollTuitFormDto dto = new CollTuitFormDto();
@@ -184,9 +171,7 @@ public class AdminService {
         return dtos;
     }
 
-	/**
-	 * 단과대 등록금 삭제 서비스
-	 */
+	// 단과대 등록금 삭제 서비스
     public int deleteCollTuit(Integer collegeId) {
         if (collegeId == null) {
             return 0;
@@ -195,9 +180,7 @@ public class AdminService {
         return 1;
     }
 
-	/**
-	 * 단과대 등록금 수정 서비스
-	 */
+	// 단과대 등록금 수정 서비스
     public int updateCollTuit(CollTuitFormDto collTuitFormDto) {
         Integer collId = collTuitFormDto.getCollegeId();
         if (collId == null) {
@@ -210,9 +193,7 @@ public class AdminService {
         }).orElse(0);
     }
 
-	/**
-	 * 강의실 입력 서비스
-	 */
+	// 강의실 입력 서비스
     @Transactional
     public void createRoom(@Validated RoomFormDto roomFormDto) {
         // 강의실 중복 입력 검사(JPA)
@@ -239,17 +220,13 @@ public class AdminService {
         roomJpaRepository.save(room);
     }
 
-	/**
-	 * 강의실 조회 서비스
-	 */
+	// 강의실 조회 서비스
     public List<Room> readRoom() {
         // JPA를 사용하여 전체 강의실 조회
-        return roomJpaRepository.findAll();
+        return roomJpaRepository.findAllByOrderByIdAsc();
     }
 
-	/**
-	 * 강의실 삭제 서비스
-	 */
+	// 강의실 삭제 서비스
     public int deleteRoom(String id) {
         if (id == null) {
             return 0;
@@ -258,9 +235,7 @@ public class AdminService {
         return 1;
     }
 
-	/**
-	 * 강의 입력 서비스
-	 */
+	// 강의 입력 서비스
     @Transactional
     public List<Subject> createSubjectAndSyllabus(@Validated SubjectFormDto subjectFormDto) {
         // 강의실, 강의시간 중복 검사
@@ -318,17 +293,47 @@ public class AdminService {
         return subjectList;
     }
 
-	/**
-	 * 강의 조회 서비스
-	 */
+	// 강의 조회 서비스
 	public List<Subject> readSubject() {
         // JPA를 사용하여 전체 과목 목록을 조회한다.
-        return subjectJpaRepository.findAll();
+        return subjectJpaRepository.findAllByOrderByIdAsc();
 	}
 
-	/**
-	 * 강의 삭제 서비스
-	 */
+    // 강의 검색 서비스 (수정 모드용 - 페이징 없음)
+    public List<Subject> searchSubjectByName(String keyword) {
+        if (keyword == null || keyword.trim().isEmpty()) {
+            return subjectJpaRepository.findAllByOrderByIdAsc();
+        }
+        return subjectJpaRepository.findByNameContainingOrderByIdAsc(keyword);
+    }
+
+    // 페이징 & 검색
+    public Map<String, Object> readSubjectWithPaging(String crud, int page, int size, String searchKeyword) {
+        Pageable pageable = PageRequest.of(page, size);
+        Page<Subject> subjectPage;
+
+        // 검색어가 있으면 검색, 없으면 전체 조회
+        if (searchKeyword != null && !searchKeyword.trim().isEmpty()) {
+            subjectPage = subjectJpaRepository.findByNameContainingOrderByIdAsc(searchKeyword, pageable);
+        } else {
+            subjectPage = subjectJpaRepository.findAllByOrderByIdAsc(pageable);
+        }
+
+        List<College> collegeList = collegeJpaRepository.findAllByOrderByIdAsc();
+
+        Map<String, Object> res = new HashMap<>();
+        res.put("crud", crud);
+        res.put("collegeList", collegeList.isEmpty() ? null : collegeList);
+        res.put("subjectList", subjectPage.getContent());
+        res.put("currentPage", subjectPage.getNumber());
+        res.put("totalPages", subjectPage.getTotalPages());
+        res.put("totalElements", subjectPage.getTotalElements());
+        res.put("pageSize", subjectPage.getSize());
+
+        return res;
+    }
+
+	// 강의 삭제 서비스
 	public int deleteSubject(Integer id) {
         if (id == null) {
             return 0;
@@ -340,62 +345,117 @@ public class AdminService {
         return 1;
 	}
 
-	/**
-	 * 강의 수정 서비스
-	 */
+	// 강의 수정 서비스
     @Transactional
     public void updateSubject(SubjectFormDto subjectFormDto) {
         // ID로 기존 Subject 조회
         Subject subject = subjectJpaRepository.findById(subjectFormDto.getId())
                 .orElseThrow(() -> new CustomRestfullException("강의 정보를 찾을 수 없습니다", HttpStatus.NOT_FOUND));
 
-        // DTO에 연도, 학기 설정 (중복 검사용)
-        subjectFormDto.setSubYear(subject.getSubYear());
-        subjectFormDto.setSemester(subject.getSemester());
+        // roomId나 시간이 변경되는 경우에만 중복 검사
+        boolean needsValidation = false;
 
-        // 강의실, 강의시간 중복 검사
-        List<Subject> subjectList = subjectJpaRepository.findByRoom_IdAndSubDayAndSubYearAndSemester(
-                subjectFormDto.getRoomId(),
-                subjectFormDto.getSubDay(),
-                subjectFormDto.getSubYear(),
-                subjectFormDto.getSemester()
-        );
+        if (subjectFormDto.getRoomId() != null && !subjectFormDto.getRoomId().equals(subject.getRoom().getId())) {
+            needsValidation = true;
+        }
+        if (subjectFormDto.getSubDay() != null && !subjectFormDto.getSubDay().equals(subject.getSubDay())) {
+            needsValidation = true;
+        }
+        if (subjectFormDto.getStartTime() != null && !subjectFormDto.getStartTime().equals(subject.getStartTime())) {
+            needsValidation = true;
+        }
+        if (subjectFormDto.getEndTime() != null && !subjectFormDto.getEndTime().equals(subject.getEndTime())) {
+            needsValidation = true;
+        }
 
-        if (subjectList != null && !subjectList.isEmpty()) {
-            SubjectUtil subjectUtil = new SubjectUtil();
-            boolean result = subjectUtil.calculate(subjectFormDto, subjectList);
-            if (result == false) {
-                throw new CustomRestfullException("해당 시간대는 강의실을 사용중입니다! 다시 선택해주세요", HttpStatus.BAD_REQUEST);
+        if (needsValidation) {
+            // 중복 검사용 값 설정
+            String checkRoomId = subjectFormDto.getRoomId() != null ? subjectFormDto.getRoomId() : subject.getRoom().getId();
+            String checkSubDay = subjectFormDto.getSubDay() != null ? subjectFormDto.getSubDay() : subject.getSubDay();
+            Integer checkStartTime = subjectFormDto.getStartTime() != null ? subjectFormDto.getStartTime() : subject.getStartTime();
+            Integer checkEndTime = subjectFormDto.getEndTime() != null ? subjectFormDto.getEndTime() : subject.getEndTime();
+
+            // 강의실, 강의시간 중복 검사
+            List<Subject> subjectList = subjectJpaRepository.findByRoom_IdAndSubDayAndSubYearAndSemester(
+                    checkRoomId,
+                    checkSubDay,
+                    subject.getSubYear(),
+                    subject.getSemester()
+            );
+
+            if (subjectList != null && !subjectList.isEmpty()) {
+                // 자기 자신은 제외
+                subjectList = subjectList.stream()
+                        .filter(s -> !s.getId().equals(subject.getId()))
+                        .collect(java.util.stream.Collectors.toList());
+
+                if (!subjectList.isEmpty()) {
+                    SubjectFormDto checkDto = new SubjectFormDto();
+                    checkDto.setId(subject.getId());
+                    checkDto.setRoomId(checkRoomId);
+                    checkDto.setSubDay(checkSubDay);
+                    checkDto.setStartTime(checkStartTime);
+                    checkDto.setEndTime(checkEndTime);
+                    checkDto.setSubYear(subject.getSubYear());
+                    checkDto.setSemester(subject.getSemester());
+
+                    SubjectUtil subjectUtil = new SubjectUtil();
+                    boolean result = subjectUtil.calculate(checkDto, subjectList);
+                    if (result == false) {
+                        throw new CustomRestfullException("해당 시간대는 강의실을 사용중입니다! 다시 선택해주세요", HttpStatus.BAD_REQUEST);
+                    }
+                }
             }
         }
 
-        // Entity 업데이트
-        subject.setName(subjectFormDto.getName());
+        // Entity 업데이트 (null이 아닌 값만)
+        if (subjectFormDto.getName() != null && !subjectFormDto.getName().trim().isEmpty()) {
+            subject.setName(subjectFormDto.getName());
+        }
 
         // Professor 엔티티 조회 후 설정
-        Professor professor = professorJpaRepository.findById(subjectFormDto.getProfessorId())
-                .orElseThrow(() -> new CustomRestfullException("교수 정보를 찾을 수 없습니다", HttpStatus.NOT_FOUND));
-        subject.setProfessor(professor);
+        if (subjectFormDto.getProfessorId() != null) {
+            Professor professor = professorJpaRepository.findById(subjectFormDto.getProfessorId())
+                    .orElseThrow(() -> new CustomRestfullException("교수 정보를 찾을 수 없습니다", HttpStatus.NOT_FOUND));
+            subject.setProfessor(professor);
+        }
 
         // Room 엔티티 조회 후 설정
-        Room room = roomJpaRepository.findById(subjectFormDto.getRoomId())
-                .orElseThrow(() -> new CustomRestfullException("강의실 정보를 찾을 수 없습니다", HttpStatus.NOT_FOUND));
-        subject.setRoom(room);
+        if (subjectFormDto.getRoomId() != null && !subjectFormDto.getRoomId().trim().isEmpty()) {
+            Room room = roomJpaRepository.findById(subjectFormDto.getRoomId())
+                    .orElseThrow(() -> new CustomRestfullException("강의실 정보를 찾을 수 없습니다", HttpStatus.NOT_FOUND));
+            subject.setRoom(room);
+        }
 
         // Department 엔티티 조회 후 설정
-        Department department = departmentJpaRepository.findById(subjectFormDto.getDeptId())
-                .orElseThrow(() -> new CustomRestfullException("학과 정보를 찾을 수 없습니다", HttpStatus.NOT_FOUND));
-        subject.setDepartment(department);
+        if (subjectFormDto.getDeptId() != null) {
+            Department department = departmentJpaRepository.findById(subjectFormDto.getDeptId())
+                    .orElseThrow(() -> new CustomRestfullException("학과 정보를 찾을 수 없습니다", HttpStatus.NOT_FOUND));
+            subject.setDepartment(department);
+        }
 
-        subject.setType(subjectFormDto.getType());
-        subject.setSubDay(subjectFormDto.getSubDay());
-        subject.setStartTime(subjectFormDto.getStartTime());
-        subject.setEndTime(subjectFormDto.getEndTime());
-        subject.setGrades(subjectFormDto.getGrades());
-        subject.setCapacity(subjectFormDto.getCapacity());
+        if (subjectFormDto.getType() != null && !subjectFormDto.getType().trim().isEmpty()) {
+            subject.setType(subjectFormDto.getType());
+        }
+        if (subjectFormDto.getSubDay() != null && !subjectFormDto.getSubDay().trim().isEmpty()) {
+            subject.setSubDay(subjectFormDto.getSubDay());
+        }
+        if (subjectFormDto.getStartTime() != null) {
+            subject.setStartTime(subjectFormDto.getStartTime());
+        }
+        if (subjectFormDto.getEndTime() != null) {
+            subject.setEndTime(subjectFormDto.getEndTime());
+        }
+        if (subjectFormDto.getGrades() != null) {
+            subject.setGrades(subjectFormDto.getGrades());
+        }
+        if (subjectFormDto.getCapacity() != null) {
+            subject.setCapacity(subjectFormDto.getCapacity());
+        }
 
         // save() 호출 (변경 감지로 자동 업데이트)
         subjectJpaRepository.save(subject);
     }
+
 
 }

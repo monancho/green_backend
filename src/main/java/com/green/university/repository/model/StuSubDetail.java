@@ -3,7 +3,7 @@ package com.green.university.repository.model;
 import lombok.Getter;
 import lombok.Setter;
 
-import javax.persistence.*;
+import jakarta.persistence.*;
 
 @Entity
 @Table(name = "stu_sub_detail_tb")
@@ -37,6 +37,7 @@ public class StuSubDetail {
     private Integer convertedMark;
 
     @OneToOne(fetch = FetchType.LAZY)
+    @MapsId
     @JoinColumn(name = "id", insertable = false, updatable = false)
     private StuSub stuSub;
 

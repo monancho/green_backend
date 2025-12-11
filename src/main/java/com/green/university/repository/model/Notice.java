@@ -1,13 +1,9 @@
 package com.green.university.repository.model;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.GenerationType;
-import javax.persistence.Id;
-import javax.persistence.Table;
+import jakarta.persistence.*;
 
 import java.sql.Timestamp;
+import java.util.List;
 
 import lombok.Data;
 
@@ -36,13 +32,31 @@ public class Notice {
     @Column(name = "created_time")
     private Timestamp createdTime;
 
-    @Column(name = "uuid_filename")
-    private String uuidFilename;
+    // 공지사항에 첨부된 파일 목록 (1:N 관계)
+    @OneToMany(mappedBy = "notice", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<NoticeFile> files;
 
-    @Column(name = "origin_filename")
-    private String originFilename;
-
+    // 첫 번째 첨부 이미지의 경로를 반환합니다.
     public String setUpImage() {
-        return "/images/uploads/" + uuidFilename;
+        if (files != null && !files.isEmpty()) {
+            return "/images/uploads/" + files.get(0).getUuidFilename();
+        }
+        return null;
+    }
+
+    // 첫 번째 첨부파일의 UUID 파일명을 반환합니다.
+    public String getUuidFilename() {
+        if (files != null && !files.isEmpty()) {
+            return files.get(0).getUuidFilename();
+        }
+        return null;
+    }
+
+    // 첫 번째 첨부파일의 원본 파일명을 반환합니다.
+    public String getOriginFilename() {
+        if (files != null && !files.isEmpty()) {
+            return files.get(0).getOriginFilename();
+        }
+        return null;
     }
 }

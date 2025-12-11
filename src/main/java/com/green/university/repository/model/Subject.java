@@ -1,15 +1,15 @@
 package com.green.university.repository.model;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.GenerationType;
-import javax.persistence.Id;
-import javax.persistence.JoinColumn;
-import javax.persistence.ManyToOne;
-import javax.persistence.Table;
-import javax.persistence.JoinColumn;
-import javax.persistence.ManyToOne;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 
 import lombok.Data;
 
@@ -75,6 +75,11 @@ public class Subject {
     @Column(name = "capacity", nullable = false)
     private Integer capacity;
 
+    // 예비 수강 신청 현재 인원
+    @Column(name = "pre_num_of_student")
+    private Integer preNumOfStudent = 0;
+
+    // 실제 수강 신청 현재 인원
     @Column(name = "num_of_student")
     private Integer numOfStudent;
 }

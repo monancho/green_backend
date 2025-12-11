@@ -1,12 +1,20 @@
 package com.green.university.service;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import com.green.university.dto.response.*;
 import com.green.university.repository.*;
 import com.green.university.repository.model.*;
+import jakarta.persistence.criteria.Predicate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,16 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 import com.green.university.dto.ProfessorListForm;
 import com.green.university.dto.SyllaBusFormDto;
 import com.green.university.dto.UpdateStudentGradeDto;
-import com.green.university.dto.response.ReadSyllabusDto;
-import com.green.university.dto.response.StudentInfoForProfessorDto;
-import com.green.university.dto.response.SubjectForProfessorDto;
-import com.green.university.dto.response.SubjectPeriodForProfessorDto;
 import com.green.university.handler.exception.CustomRestfullException;
-import com.green.university.repository.interfaces.ProfessorRepository;
-import com.green.university.repository.interfaces.StuSubDetailRepository;
-import com.green.university.repository.interfaces.StuSubRepository;
-import com.green.university.repository.interfaces.SubjectRepository;
-import com.green.university.repository.interfaces.SyllaBusRepository;
+
 
 /**
  * 
@@ -45,23 +45,55 @@ public class ProfessorService {
 
     // 교수가 맡은 과목들의 학기 검색
     @Transactional(readOnly = true)
-    public List<Integer> selectSemester(Integer id) {
+    public List<SubjectPeriodForProfessorDto> selectSemester(Integer id) {
         List<Subject> subjects = subjectJpaRepository.findByProfessor_Id(id);
 
-        // 학기만 추출 (중복 제거)
-        List<Integer> semesters = subjects.stream()
-                .map(Subject::getSemester)
+        // 년도와 학기를 함께 반환 (중복 제거)
+        // id는 null로 설정 (년도와 학기만 필요)
+        List<SubjectPeriodForProfessorDto> periods = subjects.stream()
+                .map(s -> new SubjectPeriodForProfessorDto(
+                        null,  // id는 필요 없음
+                        s.getSubYear(),
+                        s.getSemester()
+                ))
                 .distinct()
+                .sorted((a, b) -> {
+                    // 년도 내림차순, 같으면 학기 내림차순
+                    int yearCompare = b.getSubYear().compareTo(a.getSubYear());
+                    return yearCompare != 0 ? yearCompare : b.getSemester().compareTo(a.getSemester());
+                })
                 .collect(Collectors.toList());
 
-        return semesters;
+        return periods;
     }
 
 	// 년도와 학기, 교수 id를 이용하여 해당 과목의 정보 불러오기
-    @Transactional(readOnly = true)
-    public List<StuSub> selectBySubjectId(Integer subjectId) {
+    public List<StuSubResponseDto> selectBySubjectId(Integer subjectId) {
+
         List<StuSub> stuSubs = stuSubJpaRepository.findBySubjectId(subjectId);
-        return stuSubs;
+
+        return stuSubs.stream().map(stuSub -> {
+
+            Student st = stuSub.getStudent();
+
+            // 🔥 StuSubDetail 가져오기
+            StuSubDetail detail = stuSubDetailJpaRepository
+                    .findByStudentIdAndSubjectId(st.getId(), subjectId)
+                    .orElse(new StuSubDetail()); // null 방지
+
+            return new StuSubResponseDto(
+                    st.getId(),
+                    st.getName(),
+                    st.getDepartment().getName(),
+                    detail.getAbsent(),
+                    detail.getLateness(),
+                    detail.getHomework(),
+                    detail.getMidExam(),
+                    detail.getFinalExam(),
+                    detail.getConvertedMark()
+            );
+
+        }).toList();
     }
 
 	// 과목 id로 과목 Entity 불러오기
@@ -72,12 +104,7 @@ public class ProfessorService {
 		return subjectEntity;
 	}
 
-    /**
-     *
-     *
-     * @param subjectPeriodForProfessorDto
-     * @return SubjectForProfessorDto list
-     */
+    //
     @Transactional(readOnly = true)
     public List<Subject> selectSubjectBySemester(SubjectPeriodForProfessorDto subjectPeriodForProfessorDto) {
         List<Subject> subjects = subjectJpaRepository.findByProfessor_IdAndSubYearAndSemester(
@@ -89,7 +116,6 @@ public class ProfessorService {
     }
 
 	// 출결 및 성적 기입
-    // 출결 및 성적 기입
     @Transactional
     public void updateGrade(UpdateStudentGradeDto updateStudentGradeDto) {
 
@@ -97,7 +123,12 @@ public class ProfessorService {
         StuSubDetail stuSubDetail = stuSubDetailJpaRepository.findByStudentIdAndSubjectId(
                 updateStudentGradeDto.getStudentId(),
                 updateStudentGradeDto.getSubjectId()
-        ).orElseThrow(() -> new CustomRestfullException("요청을 처리하지 못했습니다.", HttpStatus.INTERNAL_SERVER_ERROR));
+        ).orElseThrow(() -> {
+            System.out.println("❌ StuSubDetail을 찾을 수 없음!");
+            return new CustomRestfullException("StuSubDetail을 찾을 수 없습니다.", HttpStatus.NOT_FOUND);
+        });
+
+        System.out.println("✅ StuSubDetail 찾음: " + stuSubDetail.getId());
 
         stuSubDetail.setAbsent(updateStudentGradeDto.getAbsent());
         stuSubDetail.setLateness(updateStudentGradeDto.getLateness());
@@ -107,23 +138,73 @@ public class ProfessorService {
         stuSubDetail.setConvertedMark(updateStudentGradeDto.getConvertedMark());
 
         stuSubDetailJpaRepository.save(stuSubDetail);
+        System.out.println("✅ StuSubDetail 저장 완료");
 
         // StuSub 업데이트
         StuSub stuSub = stuSubJpaRepository.findByStudentIdAndSubjectId(
                 updateStudentGradeDto.getStudentId(),
                 updateStudentGradeDto.getSubjectId()
-        ).orElseThrow(() -> new CustomRestfullException("요청을 처리하지 못했습니다.", HttpStatus.INTERNAL_SERVER_ERROR));
+        ).orElseThrow(() -> {
+            System.out.println("❌ StuSub을 찾을 수 없음!");
+            return new CustomRestfullException("StuSub을 찾을 수 없습니다.", HttpStatus.NOT_FOUND);
+        });
+
+        System.out.println("✅ StuSub 찾음");
 
         stuSub.setGrade(updateStudentGradeDto.getGrade());
 
         stuSubJpaRepository.save(stuSub);
+        System.out.println("✅ StuSub 저장 완료");
+        System.out.println("=== updateGrade 종료 ===");
     }
 
-	// 강의계획서 조회
+    // 강의계획서 조회
     @Transactional(readOnly = true)
-    public SyllaBus readSyllabus(Integer subjectId) {
-        return syllaBusJpaRepository.findById(subjectId)
+    public SyllabusResponseDto readSyllabus(Integer subjectId) {
+
+        SyllaBus sb = syllaBusJpaRepository.findById(subjectId)
                 .orElseThrow(() -> new CustomRestfullException("강의계획서를 찾을 수 없습니다", HttpStatus.NOT_FOUND));
+
+        Subject s = sb.getSubject();
+        Professor p = s.getProfessor();
+        Department d = p.getDepartment();
+
+        SyllabusResponseDto dto = new SyllabusResponseDto();
+
+        // 기본 정보
+        dto.setSubjectId(s.getId());
+        dto.setSubjectName(s.getName());
+        dto.setProfessorName(p.getName());
+
+        // 수업 시간 포맷
+        String classTime = String.format(
+                "%s %02d:00 ~ %02d:00",
+                s.getSubDay(),
+                s.getStartTime(),
+                s.getEndTime()
+        );
+        dto.setClassTime(classTime);
+
+        dto.setRoomId(s.getRoom().getId());
+
+        // 학사 정보
+        dto.setSubYear(s.getSubYear());
+        dto.setSemester(s.getSemester());
+        dto.setGrades(s.getGrades());
+        dto.setType(s.getType());
+
+        // 교수 정보
+        dto.setDeptName(d.getName());
+        dto.setTel(p.getTel());
+        dto.setEmail(p.getEmail());
+
+        // 강의계획서 상세
+        dto.setOverview(sb.getOverview());
+        dto.setObjective(sb.getObjective());
+        dto.setTextbook(sb.getTextbook());
+        dto.setProgram(sb.getProgram());
+
+        return dto;
     }
 
 	/**
@@ -149,20 +230,26 @@ public class ProfessorService {
 	 * @return 교수 리스트 조회
 	 */
     @Transactional(readOnly = true)
-    public List<Professor> readProfessorList(ProfessorListForm professorListForm) {
-        List<Professor> list = null;
+    public Page<Professor> readProfessorList(ProfessorListForm form) {
+        // 페이지 번호는 0-based, 한 페이지당 20개
+        Pageable pageable = PageRequest.of(
+                form.getPage(),
+                20,
+                Sort.by(Sort.Direction.ASC, "id")
+        );
 
-        if (professorListForm.getProfessorId() != null) {
-            list = professorJpaRepository.findById(professorListForm.getProfessorId())
-                    .map(Collections::singletonList)
-                    .orElse(Collections.emptyList());
-        } else if (professorListForm.getDeptId() != null) {
-            list = professorJpaRepository.findByDepartment_Id(professorListForm.getDeptId());
-        } else {
-            list = professorJpaRepository.findAll();
+        // 교수 ID로 검색
+        if (form.getProfessorId() != null) {
+            return professorJpaRepository.findByProfessorId(form.getProfessorId(), pageable);
         }
 
-        return list;
+        // 학과 ID로 검색
+        if (form.getDeptId() != null) {
+            return professorJpaRepository.findByDeptId(form.getDeptId(), pageable);
+        }
+
+        // 조건 없으면 전체 조회
+        return professorJpaRepository.findAll(pageable);
     }
 
 	/**

@@ -11,14 +11,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.green.university.dto.response.StuSubAppDto;
 import com.green.university.dto.response.StuSubDayTimeDto;
 import com.green.university.dto.response.StuSubSumGradesDto;
 import com.green.university.handler.exception.CustomRestfullException;
-import com.green.university.repository.interfaces.PreStuSubRepository;
-import com.green.university.repository.interfaces.StuSubDetailRepository;
-import com.green.university.repository.interfaces.StuSubRepository;
-import com.green.university.repository.interfaces.SubjectRepository;
 import com.green.university.utils.Define;
 import com.green.university.utils.StuSubUtil;
 
@@ -73,7 +68,7 @@ public class StuSubService {
         Subject targetSubject = subjectJpaRepository.findById(subjectId)
                 .orElseThrow(() -> new CustomRestfullException("과목 정보를 찾을 수 없습니다.", HttpStatus.NOT_FOUND));
 
-        // 현재 총 신청 학점 - PreStuSub에서 Subject 조회
+        // 현재 이 신청 학점 - PreStuSub에서 Subject 조회
         List<PreStuSub> preStuSubs = preStuSubJpaRepository.findByIdStudentId(studentId);
 
         int sumGrades = preStuSubs.stream()
@@ -106,9 +101,23 @@ public class StuSubService {
         // 현재 학생의 시간표와 겹치지 않는지 확인
         StuSubUtil.checkDayTime(targetSubject, dayTimeList);
 
-        // 수강신청 내역 추가
-        PreStuSub preStuSub = new PreStuSub(studentId, subjectId);
-        preStuSubJpaRepository.save(preStuSub);
+        // ✅ 수강신청 내역 추가
+        Student student = studentJpaRepository.findById(studentId)
+                .orElseThrow(() -> new CustomRestfullException("학생 정보를 찾을 수 없습니다.", HttpStatus.NOT_FOUND));
+
+        StuSub stuSub = new StuSub();
+        stuSub.setStudent(student);
+        stuSub.setSubject(targetSubject);
+
+        StuSub savedStuSub = stuSubJpaRepository.save(stuSub);
+
+        // ✅ 수강 상세 내역 추가
+        StuSubDetail stuSubDetail = new StuSubDetail();
+        stuSubDetail.setStuSub(savedStuSub);  // @MapsId로 ID 자동 설정
+        stuSubDetail.setStudentId(studentId);
+        stuSubDetail.setSubjectId(subjectId);
+
+        stuSubDetailJpaRepository.save(stuSubDetail);
 
         // 해당 강의 현재인원 +1
         subjectService.updatePlusNumOfStudent(subjectId);
@@ -132,46 +141,57 @@ public class StuSubService {
     @Transactional
     public void createStuSubByPreStuSub() {
 
-        // 1. 정원 >= 신청인원인 강의
-        List<Subject> subjects1 = subjectJpaRepository.findByCapacityGreaterThanEqualNumOfStudent();
+        // 1. 정원 >= 예비신청인원인 강의
+        List<Subject> subjects1 = subjectJpaRepository.findByCapacityGreaterThanEqualPreNumOfStudent(
+                Define.CURRENT_YEAR,
+                Define.CURRENT_SEMESTER
+        );
 
         for (Subject subject : subjects1) {
-
-            // 예비 수강 신청에서 해당 강의를 신청했던 내역 가져오기
             List<PreStuSub> preAppList = preStuSubJpaRepository.findByIdSubjectId(subject.getId());
 
-            // 예비 수강 신청했던 인원들이 자동으로 수강 신청되도록
-            // 해당 내역 그대로 수강 신청 추가
             for (PreStuSub pss : preAppList) {
-                // 수강 신청 내역이 없다면
-                Optional<StuSub> existingStuSub = stuSubJpaRepository.findByStudentIdAndSubjectId(
-                        pss.getStudentId(), pss.getSubjectId());
+                try {
+                    Optional<StuSub> existingStuSub = stuSubJpaRepository
+                            .findByStudentIdAndSubjectId(pss.getStudentId(), pss.getSubjectId());
 
-                if (!existingStuSub.isPresent()) {
-                    // 수강신청 내역 추가
-                    StuSub stuSub = new StuSub();
-                    Student student = studentJpaRepository.findById(pss.getStudentId())
-                            .orElseThrow(() -> new CustomRestfullException("학생 정보를 찾을 수 없습니다.", HttpStatus.NOT_FOUND));
-                    stuSub.setStudent(student);
-                    stuSub.setSubject(subject);
+                    if (!existingStuSub.isPresent()) {
+                        Student student = studentJpaRepository.findById(pss.getStudentId())
+                                .orElseThrow(() -> new CustomRestfullException(
+                                        "학생 정보를 찾을 수 없습니다. ID: " + pss.getStudentId(),
+                                        HttpStatus.NOT_FOUND));
 
-                    StuSub savedStuSub = stuSubJpaRepository.save(stuSub);
+                        StuSub stuSub = new StuSub();
+                        stuSub.setStudent(student);
+                        stuSub.setSubject(subject);
 
-                    // 수강 상세 내역에도 데이터 추가
-                    StuSubDetail stuSubDetail = new StuSubDetail();
-                    stuSubDetail.setId(savedStuSub.getId());
-                    stuSubDetail.setStudentId(pss.getStudentId());
-                    stuSubDetail.setSubjectId(pss.getSubjectId());
-                    stuSubDetailJpaRepository.save(stuSubDetail);
+                        StuSub savedStuSub = stuSubJpaRepository.save(stuSub);
+
+                        StuSubDetail stuSubDetail = new StuSubDetail();
+                        stuSubDetail.setStuSub(savedStuSub);
+                        stuSubDetail.setStudentId(pss.getStudentId());
+                        stuSubDetail.setSubjectId(pss.getSubjectId());
+
+                        stuSubDetailJpaRepository.save(stuSubDetail);
+
+                        subject.setNumOfStudent(subject.getNumOfStudent() + 1);
+                    }
+                } catch (Exception e) {
+                    System.err.println("자동 처리 실패: 학생 " + pss.getStudentId() +
+                            ", 과목 " + pss.getSubjectId() + " - " + e.getMessage());
                 }
             }
+
+            subjectJpaRepository.save(subject);
         }
 
-        // 2. 정원 < 신청인원인 강의
-        List<Subject> subjects2 = subjectJpaRepository.findByCapacityLessThanNumOfStudent();
+        // 2. 정원 초과 과목 처리
+        List<Subject> subjects2 = subjectJpaRepository.findByCapacityLessThanPreNumOfStudent(
+                Define.CURRENT_YEAR,
+                Define.CURRENT_SEMESTER
+        );
 
         for (Subject subject : subjects2) {
-            // 강의의 현재 인원 초기화
             subject.setNumOfStudent(0);
             subjectJpaRepository.save(subject);
         }
