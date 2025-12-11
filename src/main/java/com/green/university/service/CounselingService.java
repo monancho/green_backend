@@ -719,5 +719,16 @@ public class CounselingService {
             slot.setUpdatedAt(Timestamp.valueOf(now));
             slotRepo.save(slot);
         }
+
+        // 학생에게 알림 생성
+        String message = String.format("%s 교수님이 %s에 예정된 상담 예약을 취소했습니다.",
+                slot.getProfessor().getName(),
+                slot.getStartAt().toLocalDateTime().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+        notificationService.createNotification(
+                r.getStudent().getId(),
+                "RESERVATION_CANCELED_BY_PROFESSOR",
+                message,
+                r.getId()
+        );
     }
 }
