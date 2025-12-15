@@ -31,18 +31,18 @@ public class MeetingReminderScheduler {
     private NotificationJpaRepository notificationRepo;
 
     /**
-     * 매 1분마다 실행하여 회의 시작 10분 전 알림을 발송
+     * 매 5분마다 실행하여 회의 시작 10분 전 알림을 발송
      */
-    @Scheduled(fixedRate = 60000) // 1분마다 실행
+    @Scheduled(fixedRate = 300000) // 5분마다 실행 (300000ms = 5분)
     @Transactional
     public void sendMeetingReminders() {
         try {
             LocalDateTime now = LocalDateTime.now();
             LocalDateTime tenMinutesLater = now.plusMinutes(10);
             
-            // 10분 후에 시작하는 회의를 찾기 위한 시간 범위 (1분 간격)
+            // 10분 후에 시작하는 회의를 찾기 위한 시간 범위 (5분 간격)
             Timestamp startTime = Timestamp.valueOf(now.plusMinutes(10));
-            Timestamp endTime = Timestamp.valueOf(now.plusMinutes(11));
+            Timestamp endTime = Timestamp.valueOf(now.plusMinutes(15));
 
             // 승인된 예약 중에서 시작 시간이 10분 후인 예약들 조회
             List<CounselingReservation> upcomingReservations = reservationRepo

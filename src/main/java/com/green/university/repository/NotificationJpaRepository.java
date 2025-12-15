@@ -51,5 +51,14 @@ public interface NotificationJpaRepository extends JpaRepository<Notification, L
      * 특정 예약 ID와 타입으로 알림이 이미 존재하는지 확인
      */
     boolean existsByReservationIdAndType(Long reservationId, String type);
+
+    /**
+     * 오늘 날짜에 특정 사용자에게 특정 타입의 알림이 이미 존재하는지 확인
+     */
+    @Query("SELECT COUNT(n) > 0 FROM Notification n " +
+           "WHERE n.userId = :userId " +
+           "AND n.type = :type " +
+           "AND DATE(n.createdAt) = CURRENT_DATE")
+    boolean existsByUserIdAndTypeAndToday(@Param("userId") Integer userId, @Param("type") String type);
 }
 
