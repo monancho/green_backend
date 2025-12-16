@@ -2,7 +2,9 @@ package com.green.university.service;
 
 import com.green.university.repository.AIAnalysisResultRepository;
 import com.green.university.repository.StuSubDetailJpaRepository;
+import com.green.university.repository.StudentJpaRepository;
 import com.green.university.repository.TuitionJpaRepository;
+import com.green.university.repository.model.*;
 import com.green.university.repository.StudentJpaRepository;
 import com.green.university.repository.SubjectJpaRepository;
 import com.green.university.repository.NotificationJpaRepository;
@@ -40,6 +42,9 @@ public class AIAnalysisResultService {
     private final StudentJpaRepository studentRepository;
     private final SubjectJpaRepository subjectRepository;
     private final NotificationJpaRepository notificationRepo;
+
+    @Autowired
+    private StudentJpaRepository studentJpaRepository;
 
     @Autowired
     private GeminiService geminiService;
@@ -119,7 +124,7 @@ public class AIAnalysisResultService {
         result.setMidtermStatus(analyzeMidterm(studentId, subjectId));
         result.setFinalStatus(analyzeFinal(studentId, subjectId));
         result.setTuitionStatus(analyzeTuition(studentId, year, semester));
-        result.setCounselingStatus(analyzeCounseling(studentId));
+        result.setCounselingStatus(analyzeCounseling(studentId, subjectId));
 
         // 종합 위험도 계산
         result.setOverallRisk(calculateOverallRisk(result));
@@ -182,7 +187,9 @@ public class AIAnalysisResultService {
     @Transactional(readOnly = true)
     public List<AIAnalysisResult> getAllStudents() {
         // 1. 모든 학생-과목 조합 조회
-        List<StuSubDetail> allEnrollments = stuSubDetailRepository.findAllWithStudentAndSubject();
+        List<StuSubDetail> allEnrollments = stuSubDetailRepository.findAllWithStudentAndSubject().stream()
+                .filter(e -> e.getStudent() != null && e.getSubject() != null)  // null 체크
+                .collect(Collectors.toList());
 
         // 2. 기존 AI 분석 결과 조회
         List<AIAnalysisResult> existingResults = aiAnalysisResultRepository.findAllWithRelations();
@@ -207,6 +214,11 @@ public class AIAnalysisResultService {
                 // DB에 저장된 분석 결과가 있으면 사용
                 allResults.add(resultMap.get(key));
             } else {
+                // null 체크 후 기본값 생성
+                if (enrollment.getStudent() == null || enrollment.getSubject() == null) {
+                    continue;
+                }
+
                 // DB에 없으면 기본값 생성 (아직 분석되지 않음)
                 AIAnalysisResult defaultResult = new AIAnalysisResult();
                 defaultResult.setStudentId(enrollment.getStudentId());
@@ -239,6 +251,10 @@ public class AIAnalysisResultService {
         // 기존 분석 결과 확인
         AIAnalysisResult existingResult = getLatestAnalysisResult(studentId, subjectId);
 
+        StuSubDetail detail = stuSubDetailRepository
+                .findByStudentIdAndSubjectId(studentId, subjectId)
+                .orElse(null);
+
         // 이미 오늘 분석한 결과가 있으면 업데이트, 없으면 새로 생성
         AIAnalysisResult result;
         if (existingResult != null &&
@@ -248,6 +264,8 @@ public class AIAnalysisResultService {
             result = new AIAnalysisResult();
             result.setStudentId(studentId);
             result.setSubjectId(subjectId);
+            result.setStudent(detail.getStudent());
+            result.setSubject(detail.getSubject());
             result.setAnalysisYear(year);
             result.setSemester(semester);
         }
@@ -258,7 +276,7 @@ public class AIAnalysisResultService {
         result.setMidtermStatus(analyzeMidterm(studentId, subjectId));
         result.setFinalStatus(analyzeFinal(studentId, subjectId));
         result.setTuitionStatus(analyzeTuition(studentId, year, semester));
-        result.setCounselingStatus(analyzeCounseling(studentId));
+        result.setCounselingStatus(analyzeCounseling(studentId, subjectId));
 
         // 이전 위험도 저장 (알림 발송 여부 판단용)
         String previousRisk = result.getOverallRisk();
@@ -270,11 +288,6 @@ public class AIAnalysisResultService {
         // RISK 또는 CRITICAL인 경우 AI 코멘트 생성
         if ("RISK".equals(newRisk) || "CRITICAL".equals(newRisk)) {
             try {
-                // StuSubDetail 조회
-                StuSubDetail detail = stuSubDetailRepository
-                        .findByStudentIdAndSubjectId(studentId, subjectId)
-                        .orElse(null);
-
                 String aiComment = geminiService.generateRiskComment(result, detail);
                 result.setAnalysisDetail(aiComment);
             } catch (Exception e) {
@@ -463,11 +476,11 @@ public class AIAnalysisResultService {
     /**
      * 상담 분석
      */
-    private String analyzeCounseling(Integer studentId) {
+    private String analyzeCounseling(Integer studentId, Integer subjectId) {
         LocalDateTime threeMonthsAgo = LocalDateTime.now().minusMonths(3);
 
         List<AICounseling> counselings =
-                counselingQueryService.getCompletedCounselingsForAnalysis(studentId);
+                counselingQueryService.getCompletedCounselingsForAnalysisBySubject(studentId, subjectId);
 
         List<AICounseling> recentCounselings = counselings.stream()
                 .filter(c -> c.getCompletedAt() != null &&
@@ -629,6 +642,74 @@ public class AIAnalysisResultService {
     }
 
     /**
+     * 교수 담당 학생의 분석 결과 조회 - DB 조회
+     */
+    @Transactional(readOnly = true)
+    public List<AIAnalysisResult> getAdvisorStudents(Integer advisorId) {
+        // 1. 담당 학생 목록 조회
+        List<Student> advisorStudents = studentJpaRepository.findByAdvisorId(advisorId);
+
+        if (advisorStudents.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        // 2. 담당 학생들의 모든 수강 과목 조회
+        List<Integer> studentIds = advisorStudents.stream()
+                .map(Student::getId)
+                .collect(Collectors.toList());
+
+        List<StuSubDetail> allEnrollments = stuSubDetailRepository.findAllWithStudentAndSubject().stream()
+                .filter(e -> studentIds.contains(e.getStudentId()))
+                .filter(e -> e.getStudent() != null && e.getSubject() != null)
+                .collect(Collectors.toList());
+
+        // 3. 기존 AI 분석 결과 조회 (담당 학생만)
+        List<AIAnalysisResult> existingResults = aiAnalysisResultRepository.findByAdvisorIdWithRelations(advisorId);
+
+        // 4. 기존 분석 결과를 Map으로 변환 (최신 것만)
+        Map<String, AIAnalysisResult> resultMap = existingResults.stream()
+                .collect(Collectors.toMap(
+                        result -> result.getStudentId() + "-" + result.getSubjectId(),
+                        result -> result,
+                        (existing, replacement) ->
+                                existing.getAnalyzedAt().isAfter(replacement.getAnalyzedAt())
+                                        ? existing : replacement
+                ));
+
+        // 5. 모든 학생-과목에 대해 결과 생성
+        List<AIAnalysisResult> allResults = new ArrayList<>();
+
+        for (StuSubDetail enrollment : allEnrollments) {
+            String key = enrollment.getStudentId() + "-" + enrollment.getSubjectId();
+
+            if (resultMap.containsKey(key)) {
+                // DB에 저장된 분석 결과가 있으면 사용
+                allResults.add(resultMap.get(key));
+            } else {
+                if (enrollment.getStudent() == null || enrollment.getSubject() == null) {
+                    continue;  // skip
+                }
+                // DB에 없으면 기본값 생성 (아직 분석되지 않음)
+                AIAnalysisResult defaultResult = new AIAnalysisResult();
+                defaultResult.setStudentId(enrollment.getStudentId());
+                defaultResult.setSubjectId(enrollment.getSubjectId());
+                defaultResult.setStudent(enrollment.getStudent());
+                defaultResult.setSubject(enrollment.getSubject());
+
+                defaultResult.setAttendanceStatus("NORMAL");
+                defaultResult.setHomeworkStatus("NORMAL");
+                defaultResult.setMidtermStatus("NORMAL");
+                defaultResult.setFinalStatus("NORMAL");
+                defaultResult.setTuitionStatus("NORMAL");
+                defaultResult.setCounselingStatus("NORMAL");
+                defaultResult.setOverallRisk("NORMAL");
+                defaultResult.setAnalyzedAt(null); // 아직 분석 안됨
+
+                allResults.add(defaultResult);
+            }
+        }
+
+        return allResults;
      * 위험도가 RISK 또는 CRITICAL일 때 알림 발송
      * 하루에 한 번만 알림 발송 (중복 방지)
      */
