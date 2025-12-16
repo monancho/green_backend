@@ -27,6 +27,7 @@ public class AICounselingService {
     private final ProfessorJpaRepository professorRepository;
     private final SubjectJpaRepository subjectRepository;
     private final GeminiService geminiService;
+    private final NotificationService notificationService;
 
     // ✅ AI 분석 서비스 추가
     private final AIAnalysisResultService aiAnalysisResultService;
@@ -131,12 +132,19 @@ public class AICounselingService {
 
             if (!results.isEmpty()) {
                 AIAnalysisResult result = results.get(0);
+                String previousRisk = result.getOverallRisk();
                 result.setCounselingStatus(riskLevel);
 
                 String overallRisk = recalculateOverallRisk(result);
                 result.setOverallRisk(overallRisk);
 
-                aiAnalysisResultRepository.save(result);
+                AIAnalysisResult saved = aiAnalysisResultRepository.save(result);
+
+                // 위험도가 RISK 또는 CRITICAL로 변경된 경우 알림 발송
+                if ((overallRisk.equals("RISK") || overallRisk.equals("CRITICAL")) &&
+                    (previousRisk == null || !previousRisk.equals(overallRisk))) {
+                    sendRiskNotifications(saved, overallRisk);
+                }
             }
         } catch (Exception e) {
             System.err.println("상담 상태 업데이트 실패: " + e.getMessage());
@@ -237,5 +245,80 @@ public class AICounselingService {
 
     public List<AICounseling> getCompletedCounselingsForAnalysis(Integer studentId) {
         return aiCounselingRepository.findCompletedCounselingsWithContentByStudentId(studentId);
+    }
+
+    /**
+     * 위험도가 RISK 또는 CRITICAL일 때 알림 발송
+     */
+    private void sendRiskNotifications(AIAnalysisResult result, String riskLevel) {
+        try {
+            Integer studentId = result.getStudentId();
+            Integer subjectId = result.getSubjectId();
+
+            if (studentId == null || subjectId == null) {
+                System.err.println("학생 ID 또는 과목 ID가 null입니다. 알림 발송 건너뜀.");
+                return;
+            }
+
+            // 학생 정보 조회
+            Student student = studentRepository.findById(studentId)
+                    .orElse(null);
+            if (student == null) {
+                System.err.println("학생을 찾을 수 없습니다. ID: " + studentId);
+                return;
+            }
+
+            // 과목 정보 조회 (교수 정보 포함)
+            Subject subject = subjectRepository.findById(subjectId)
+                    .orElse(null);
+            if (subject == null) {
+                System.err.println("과목을 찾을 수 없습니다. ID: " + subjectId);
+                return;
+            }
+
+            if (subject.getProfessor() == null) {
+                System.err.println("과목에 교수 정보가 없습니다. 과목 ID: " + subjectId);
+                return;
+            }
+
+            String studentName = student.getName();
+            String subjectName = subject.getName();
+            Integer professorId = subject.getProfessor().getId();
+            String professorName = subject.getProfessor().getName();
+
+            String riskLabel = riskLevel.equals("CRITICAL") ? "심각" : "위험";
+
+            // 학생에게 알림
+            String studentMessage = String.format(
+                    "%s 과목에서 %s 상태가 감지되었습니다. 상담을 받으시기 바랍니다.",
+                    subjectName,
+                    riskLabel
+            );
+            notificationService.createNotification(
+                    studentId,
+                    "STUDENT_RISK_ALERT",
+                    studentMessage,
+                    null
+            );
+
+            // 교수에게 알림
+            String professorMessage = String.format(
+                    "%s 학생이 %s 과목에서 %s 상태입니다. 상담이 필요합니다.",
+                    studentName,
+                    subjectName,
+                    riskLabel
+            );
+            notificationService.createNotification(
+                    professorId,
+                    "PROFESSOR_RISK_ALERT",
+                    professorMessage,
+                    null
+            );
+
+            System.out.println("위험 알림 발송 완료: 학생=" + studentName + ", 과목=" + subjectName + ", 위험도=" + riskLevel);
+        } catch (Exception e) {
+            System.err.println("위험 알림 발송 실패: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 }
