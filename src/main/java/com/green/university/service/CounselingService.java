@@ -42,6 +42,9 @@ public class CounselingService {
     @Autowired
     private MeetingService meetingService;
 
+    @Autowired
+    private NotificationService notificationService;
+
     // ============= 공통 유틸/검증 =============
 
 
@@ -336,6 +339,17 @@ public class CounselingService {
         slot.setStatus(CounselingSlotStatus.RESERVED);
         slot.setUpdatedAt(Timestamp.valueOf(now));
         slotRepo.save(slot);
+
+        // 교수에게 알림 생성
+        String message = String.format("%s 학생이 %s에 상담 예약을 신청했습니다.",
+                student.getName(),
+                start.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+        notificationService.createNotification(
+                slot.getProfessor().getId(),
+                "RESERVATION_REQUEST",
+                message,
+                saved.getId()
+        );
 
         return toReservationDto(saved);
     }
@@ -636,6 +650,17 @@ public class CounselingService {
                 r.getStudent().getEmail(),
                 r.getStudent().getId()
         );
+
+        // 학생에게 알림 생성
+        String message = String.format("%s 교수님이 %s에 상담 예약을 승인했습니다.",
+                slot.getProfessor().getName(),
+                slot.getStartAt().toLocalDateTime().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+        notificationService.createNotification(
+                r.getStudent().getId(),
+                "RESERVATION_APPROVED",
+                message,
+                r.getId()
+        );
     }
 
     /**
@@ -694,5 +719,40 @@ public class CounselingService {
             slot.setUpdatedAt(Timestamp.valueOf(now));
             slotRepo.save(slot);
         }
+
+        // 학생에게 알림 생성
+        String message = String.format("%s 교수님이 %s에 예정된 상담 예약을 취소했습니다.",
+                slot.getProfessor().getName(),
+                slot.getStartAt().toLocalDateTime().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+        notificationService.createNotification(
+                r.getStudent().getId(),
+                "RESERVATION_CANCELED_BY_PROFESSOR",
+                message,
+                r.getId()
+        );
+    }
+
+
+    /**
+     * 교수-학생 간 완료된 상담 내역 조회 (슬롯 시간 기준)
+     */
+    @Transactional(readOnly = true)
+    public List<CounselingReservationResDto> getCompletedCounselingsByProfessorAndStudent(
+            Integer professorId,
+            Integer studentId
+    ) {
+        // 과거 시간대의 예약 중 APPROVED 상태인 것만 조회
+        LocalDateTime now = LocalDateTime.now();
+        Timestamp nowTs = Timestamp.valueOf(now);
+
+        List<CounselingReservation> reservations = reservationRepo
+                .findBySlot_Professor_IdAndStudent_IdAndStatusAndSlot_EndAtLessThanOrderBySlot_StartAtDesc(
+                        professorId,
+                        studentId,
+                        CounselingReservationStatus.APPROVED,
+                        nowTs
+                );
+
+        return mapReservationsToDtos(reservations);
     }
 }
