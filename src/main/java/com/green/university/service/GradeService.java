@@ -218,6 +218,17 @@ public class GradeService {
                 .orElse(null);
         dto.setEvaluationId(evaluation != null ? evaluation.getEvaluationId() : null);
 
+        if (evaluation != null) {
+            dto.setGrade(stuSub.getGrade());
+            dto.setGrades(subject != null ? String.valueOf(subject.getGrades()) : null);
+            dto.setGradeValue(stuSub.getGrade() != null ? String.valueOf(convertGradeToValue(stuSub.getGrade())) : null);
+        } else {
+            // 강의평가 미완료시 성적 숨김
+            dto.setGrade(null);
+            dto.setGrades(subject != null ? String.valueOf(subject.getGrades()) : null);
+            dto.setGradeValue(null);
+        }
+
         return dto;
     }
 

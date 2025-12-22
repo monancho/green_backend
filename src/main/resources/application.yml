@@ -56,7 +56,7 @@ spring:
     host: smtp.gmail.com
     port: 587
     username: jhjun7338@gmail.com
-    password:
+    password: bmhq dynh jpix nggz
     properties:
       mail:
         smtp:
@@ -70,7 +70,7 @@ spring:
 
 gemini:
   api:
-    key:
+    key: AIzaSyDk201IOhtTgnJep5J2UbnWEQlxWZPkXYE
 
   # Removed mybatis configuration since the project now uses Spring Data JPA
 
