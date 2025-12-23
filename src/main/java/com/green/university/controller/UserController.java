@@ -2,6 +2,7 @@ package com.green.university.controller;
 
 import java.util.List;
 
+import com.green.university.dto.response.UserSearchItemResDto;
 import jakarta.validation.Valid;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -207,5 +208,12 @@ public class UserController {
         body.put("message", "학생 학년과 학기가 업데이트되었습니다.");
         return ResponseEntity.ok(body);
     }
-
+    @GetMapping("/search")
+    public ResponseEntity<List<UserSearchItemResDto>> search(
+            @RequestParam String role,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) Integer meetingId
+    ) {
+        return ResponseEntity.ok(userService.searchUsersByRoleAndName(role, q, meetingId));
+    }
 }

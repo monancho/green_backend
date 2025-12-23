@@ -70,14 +70,17 @@ public class CounselingController {
      * 내 예약 취소
      * DELETE /api/counseling/reservations/{reservationId}
      */
-    @DeleteMapping("/reservations/{reservationId}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void cancelReservation(
-            @AuthenticationPrincipal PrincipalDto principal,
-            @PathVariable Long reservationId
+    @PostMapping("/reservations/{id}/cancel")
+    public ResponseEntity<Void> cancelByStudent(
+            @PathVariable Long id,
+            @RequestParam(required = false) String reason,
+            @AuthenticationPrincipal PrincipalDto principal
     ) {
-        counselingService.cancelReservation(principal, reservationId);
+        counselingService.cancelReservation(principal, id, reason);
+        return ResponseEntity.ok().build();
     }
+
+
 
     /**
      * 내 상담 예약 목록 조회 (학생용)
@@ -190,8 +193,12 @@ public class CounselingController {
     }
 
     @PostMapping("/professor/reservations/{id}/cancel")
-    public ResponseEntity<Void> cancel(@PathVariable Long id, @AuthenticationPrincipal PrincipalDto principal) {
-        counselingService.cancelReservationByProfessor(principal, id);
+    public ResponseEntity<Void> cancelByProfessor(
+            @PathVariable Long id,
+            @RequestParam(required = false) String reason,
+            @AuthenticationPrincipal PrincipalDto principal
+    ) {
+        counselingService.cancelReservationByProfessor(principal, id, reason);
         return ResponseEntity.ok().build();
     }
 

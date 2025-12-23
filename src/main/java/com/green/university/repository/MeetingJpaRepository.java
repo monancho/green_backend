@@ -13,4 +13,6 @@ public interface MeetingJpaRepository extends JpaRepository<Meeting, Integer> {
 
     // 상태 + 주최자 기준으로 필터링하고 싶을 때 사용 가능
     List<Meeting> findByHost_IdAndStatusOrderByStartAtDesc(Integer hostUserId, String status);
+
+
 }

@@ -2,14 +2,19 @@ package com.green.university.controller;
 
 import com.green.university.dto.ChatMessageDto;
 import com.green.university.dto.MediaStateSignalMessageDto;
+import com.green.university.dto.MediaStateSnapshotMessageDto;
 import com.green.university.presence.MediaStateStore;
 import com.green.university.service.MeetingChatService;
 import com.green.university.service.MeetingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.messaging.MessageHeaders;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
+import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
+import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
+import org.springframework.messaging.simp.SimpMessageType;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
@@ -22,6 +27,13 @@ public class MeetingWebSocketController {
     private final SimpMessagingTemplate messagingTemplate;
     private  final MeetingService meetingService;
 
+    private MessageHeaders createHeaders(String sessionId) {
+        SimpMessageHeaderAccessor accessor =
+                SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
+        accessor.setSessionId(sessionId);
+        accessor.setLeaveMutable(true);
+        return accessor.getMessageHeaders();
+    }
     private final MediaStateStore mediaStateStore;
     @MessageMapping("/meetings/{meetingId}/chat")
     public void handleChat(
@@ -69,10 +81,7 @@ public class MeetingWebSocketController {
             @DestinationVariable Integer meetingId,
             @Payload MediaStateSignalMessageDto payload
     ) {
-        if (payload == null) {
-            log.warn("[MeetingWebSocketController] MEDIA_STATE payload 가 null 입니다.");
-            return;
-        }
+        if (payload == null) return;
 
         payload.setMeetingId(meetingId);
 
@@ -80,32 +89,49 @@ public class MeetingWebSocketController {
             payload.setType("MEDIA_STATE");
         }
 
+        if (payload.getTs() == null) {
+            payload.setTs(System.currentTimeMillis());
+        }
+
         Integer userId = payload.getUserId();
-        if (userId == null) {
-            log.warn("[MeetingWebSocketController] MEDIA_STATE userId 없음. payload={}", payload);
-            return;
-        }
+        if (userId == null) return;
 
-        if (payload.getDisplay() == null || payload.getDisplay().isBlank()) {
-            log.warn("[MeetingWebSocketController] MEDIA_STATE display 없음. payload={}", payload);
-            return;
-        }
+        if (payload.getDisplay() == null || payload.getDisplay().isBlank()) return;
 
-        // MediaStateStore에 상태 업데이트
         mediaStateStore.update(
                 meetingId,
                 userId,
                 payload.getAudio(),
                 payload.getVideo(),
                 payload.getVideoDeviceLost(),
-                payload.getDisplay()
+                payload.getDisplay(),
+                payload.getVideoSource(),
+                payload.getScreenSoftMuted(),
+                payload.getScreenCapturing(),
+                payload.getTs()
         );
-
-        log.debug("[MeetingWebSocketController] MEDIA_STATE 수신: {}", payload);
 
         String destination = String.format("/sub/meetings/%d/signals", meetingId);
         messagingTemplate.convertAndSend(destination, payload);
-        log.debug("[MeetingWebSocketController] MEDIA_STATE 브로드캐스트 dest={}, payload={}", destination, payload);
+    }
+
+
+    @MessageMapping("/meetings/{meetingId}/signals/snapshot")
+    public void handleMediaSnapshotRequest(
+            @DestinationVariable Integer meetingId,
+            @Header("simpSessionId") String sessionId
+    ) {
+        MediaStateSnapshotMessageDto snap = new MediaStateSnapshotMessageDto();
+        snap.setMeetingId(meetingId);
+        snap.setTs(System.currentTimeMillis());
+        snap.setStates(mediaStateStore.list(meetingId));
+
+        messagingTemplate.convertAndSendToUser(
+                sessionId,
+                "/queue/signals",
+                snap,
+                createHeaders(sessionId)
+        );
     }
 
 
