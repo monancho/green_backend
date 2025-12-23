@@ -1,6 +1,5 @@
 {
   "Version": "2008-10-17",
-  "Id": "PolicyForCloudFrontPrivateContent",
   "Statement": [
     {
       "Sid": "AllowCloudFrontServicePrincipal",
@@ -17,11 +16,11 @@
       }
     },
     {
-      "Sid": "PublicReadGetObject",
+      "Sid": "PublicReadImagesOnly",
       "Effect": "Allow",
       "Principal": "*",
       "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::green-front-51217/*"
+      "Resource": "arn:aws:s3:::green-front-51217/public/*"
     }
   ]
 }

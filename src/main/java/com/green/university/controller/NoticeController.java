@@ -28,6 +28,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import jakarta.servlet.http.HttpServletRequest;
+import java.util.Optional;
+
 import com.green.university.dto.NoticeFormDto;
 import com.green.university.dto.NoticePageFormDto;
 import com.green.university.handler.exception.CustomRestfullException;
@@ -241,15 +244,49 @@ public class NoticeController {
     /**
      * 파일 다운로드
      * GET /api/notice/file/{uuidFilename}
+     * GET /api/notice/file/public/{uuidFilename} (하위 호환성)
      */
-    @GetMapping("/file/{uuidFilename}")
-    public ResponseEntity<Resource> downloadFile(@PathVariable String uuidFilename) {
+    @GetMapping("/file/**")
+    public ResponseEntity<Resource> downloadFile(HttpServletRequest request) {
         try {
-            NoticeFile noticeFile = noticeFileJpaRepository.findById(uuidFilename)
-                    .orElseThrow(() -> new CustomRestfullException("파일을 찾을 수 없습니다.", HttpStatus.NOT_FOUND));
+            // 요청 경로에서 파일명 추출 (/api/notice/file/ 이후 부분)
+            String requestPath = request.getRequestURI();
+            String pathPrefix = "/api/notice/file/";
+            String fileKey = requestPath.substring(requestPath.indexOf(pathPrefix) + pathPrefix.length());
+            
+            // URL 디코딩 (한글 파일명 지원)
+            fileKey = java.net.URLDecoder.decode(fileKey, StandardCharsets.UTF_8.name());
+            
+            // DB에서 파일 찾기 (public/ 포함 여부와 관계없이)
+            NoticeFile noticeFile = noticeFileJpaRepository.findById(fileKey)
+                    .orElse(null);
+            
+            // fileKey에 public/이 없으면 추가해서 다시 시도
+            if (noticeFile == null && !fileKey.startsWith("public/")) {
+                noticeFile = noticeFileJpaRepository.findById("public/" + fileKey)
+                        .orElse(null);
+                if (noticeFile != null) {
+                    fileKey = "public/" + fileKey;
+                }
+            }
+            
+            // fileKey에 public/이 있으면 제거해서 다시 시도
+            if (noticeFile == null && fileKey.startsWith("public/")) {
+                String keyWithoutPublic = fileKey.substring(7); // "public/".length()
+                noticeFile = noticeFileJpaRepository.findById(keyWithoutPublic)
+                        .orElse(null);
+                if (noticeFile != null) {
+                    fileKey = keyWithoutPublic;
+                }
+            }
+            
+            if (noticeFile == null) {
+                throw new CustomRestfullException("파일을 찾을 수 없습니다.", HttpStatus.NOT_FOUND);
+            }
 
-            // S3에서 파일 다운로드
-            InputStream inputStream = s3Service.downloadFile(uuidFilename);
+            // S3에서 파일 다운로드 (DB에 저장된 실제 경로 사용)
+            String s3Key = noticeFile.getUuidFilename();
+            InputStream inputStream = s3Service.downloadFile(s3Key);
             InputStreamResource resource = new InputStreamResource(inputStream);
 
             // 파일명 인코딩 (한글 파일명 지원)
