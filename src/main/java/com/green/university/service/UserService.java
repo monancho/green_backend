@@ -43,7 +43,8 @@ public class UserService {
     private ProfessorJpaRepository professorJpaRepository;
     @Autowired
     private StudentJpaRepository studentJpaRepository;
-
+    @Autowired
+    private MeetingParticipantJpaRepository meetingParticipantJpaRepository;
     @Autowired
     private PasswordEncoder passwordEncoder;
     @Autowired
@@ -604,6 +605,60 @@ public class UserService {
                         "사용자 정보를 찾을 수 없습니다.", HttpStatus.INTERNAL_SERVER_ERROR));
     }
 
+
+    @Transactional(readOnly = true)
+    public List<UserSearchItemResDto> searchUsersByRoleAndName(String role, String keyword, Integer meetingId) {
+        if (role == null || role.trim().isEmpty()) {
+            throw new CustomRestfullException("role 값이 필요합니다.", HttpStatus.BAD_REQUEST);
+        }
+
+        String r = role.trim().toLowerCase();
+        String q = (keyword == null) ? "" : keyword.trim();
+        if (q.length() < 2) return List.of();
+
+        // ✅ meetingId가 있으면, "이미 초대/참가 중"인 유저 id set 만들기
+        final java.util.Set<Integer> alreadySet;
+        if (meetingId == null) {
+            alreadySet = java.util.Set.of();
+        } else {
+            var ids = meetingParticipantJpaRepository.findUserIdsByMeetingIdAndStatusIn(
+                    meetingId,
+                    java.util.List.of("INVITED", "JOINED")
+            );
+            alreadySet = new java.util.HashSet<>(ids);
+        }
+
+        switch (r) {
+            case "student":
+                return studentJpaRepository.findByNameContainingIgnoreCaseOrderByNameAsc(q).stream()
+                        .map(s -> new UserSearchItemResDto(
+                                s.getId(), s.getName(), "student", s.getEmail(),
+                                alreadySet.contains(s.getId())
+                        ))
+                        .toList();
+
+            case "professor":
+                return professorJpaRepository.findByNameContainingIgnoreCaseOrderByNameAsc(q).stream()
+                        .map(p -> new UserSearchItemResDto(
+                                p.getId(), p.getName(), "professor", p.getEmail(),
+                                alreadySet.contains(p.getId())
+                        ))
+                        .toList();
+
+            case "staff":
+                return staffJpaRepository.findByNameContainingIgnoreCaseOrderByNameAsc(q).stream()
+                        .map(st -> new UserSearchItemResDto(
+                                st.getId(), st.getName(), "staff", st.getEmail(),
+                                alreadySet.contains(st.getId())
+                        ))
+                        .toList();
+
+            default:
+                throw new CustomRestfullException("지원하지 않는 role 입니다.", HttpStatus.BAD_REQUEST);
+        }
+    }
+
+
     /**
      * UserService.java에 이 메서드를 추가하세요
      * 현재 사용자의 이메일 조회
@@ -629,6 +684,7 @@ public class UserService {
             throw new CustomRestfullException("지원하지 않는 사용자 유형입니다.", HttpStatus.BAD_REQUEST);
         }
     }
+
 
 }
 

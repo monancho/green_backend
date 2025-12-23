@@ -34,4 +34,6 @@ public interface ProfessorJpaRepository extends JpaRepository<Professor, Integer
     Page<Professor> findByProfessorId(@Param("professorId") Integer professorId, Pageable pageable);
 
     List<Professor> findByDepartmentId(Integer deptId);
+    List<Professor> findByNameContainingIgnoreCaseOrderByNameAsc(String name);
+
 }

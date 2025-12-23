@@ -62,4 +62,7 @@ public interface StudentJpaRepository extends JpaRepository<Student, Integer> {
     List<Student> findByAdvisorId(Integer advisorId);
 
     List<Student> findByGrade(Integer grade);
+
+    List<Student> findByNameContainingIgnoreCaseOrderByNameAsc(String name);
+
 }
