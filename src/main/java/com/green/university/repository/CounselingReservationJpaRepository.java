@@ -37,4 +37,18 @@ public interface CounselingReservationJpaRepository extends JpaRepository<Counse
 
     // 특정 슬롯의 예약 전체 (교수 상세 보기 / 슬롯 상태 계산용)
     List<CounselingReservation> findBySlot_Id(Long slotId);
+
+    // 승인된 예약 중에서 시작 시간이 특정 시간 범위 내에 있는 예약 조회
+    List<CounselingReservation> findByStatusAndSlot_StartAtBetween(
+            CounselingReservationStatus status,
+            Timestamp start,
+            Timestamp end
+    );
+
+    List<CounselingReservation> findBySlot_Professor_IdAndStudent_IdAndStatusAndSlot_EndAtLessThanOrderBySlot_StartAtDesc(
+            Integer professorId,
+            Integer studentId,
+            CounselingReservationStatus status,
+            Timestamp endAt
+    );
 }

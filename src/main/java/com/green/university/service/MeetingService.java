@@ -2,23 +2,25 @@ package com.green.university.service;
 
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Random;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
-import com.green.university.dto.response.MeetingJoinInfoResDto;
-import com.green.university.dto.response.MeetingPingResDto;
-import com.green.university.dto.response.MeetingSimpleResDto;
+import com.green.university.dto.ChatMessageDto;
+import com.green.university.dto.MediaStateSignalMessageDto;
+import com.green.university.dto.PresenceEventDto;
+import com.green.university.dto.response.*;
 import com.green.university.enums.MeetingStatus;
+import com.green.university.presence.MediaStateStore;
+import com.green.university.presence.PresenceStore;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.green.university.dto.CreateMeetingReqDto;
 
-import com.green.university.dto.response.PrincipalDto;
 import com.green.university.handler.exception.CustomRestfullException;
 import com.green.university.repository.MeetingJpaRepository;
 import com.green.university.repository.MeetingParticipantJpaRepository;
@@ -26,6 +28,7 @@ import com.green.university.repository.model.Meeting;
 import com.green.university.repository.model.MeetingParticipant;
 import com.green.university.repository.model.User;
 
+@Slf4j
 @Service
 public class MeetingService {
 
@@ -38,6 +41,16 @@ public class MeetingService {
     @Autowired
     private UserService userService; // 기존 UserService 사용 (user 조회 용)
 
+    @Autowired
+    private MeetingChatService meetingChatService;
+
+    @Autowired
+    private SimpMessagingTemplate messagingTemplate;
+
+    @Autowired
+    private PresenceStore presenceStore;
+    @Autowired
+    private MediaStateStore mediaStateStore;
     private final Random random = new Random();
 
     /**
@@ -78,29 +91,41 @@ public class MeetingService {
             );
         }
     }
+    private void validateCreatePermission(PrincipalDto principal) {
+        String role = principal.getUserRole() != null ? principal.getUserRole().toUpperCase() : "";
+
+        boolean allowed = "ADMIN".equals(role) || "STAFF".equals(role) || "PROFESSOR".equals(role);
+
+        if (!allowed) {
+            throw new CustomRestfullException("회의 생성 권한이 없습니다.", HttpStatus.FORBIDDEN);
+        }
+    }
 
 
     @Transactional
-    public MeetingParticipant addGuestParticipant(
-            Integer meetingId,
-            String email,
-            Integer userId
-    ) {
+    public MeetingParticipant addGuestParticipant(Integer meetingId, String email, Integer userId) {
         Meeting meeting = meetingJpaRepository.findById(meetingId)
-                .orElseThrow(() ->
-                        new CustomRestfullException("회의를 찾을 수 없습니다.", HttpStatus.NOT_FOUND));
+                .orElseThrow(() -> new CustomRestfullException("회의를 찾을 수 없습니다.", HttpStatus.NOT_FOUND));
 
         User user = userService.readUserById(userId);
 
-        // 이미 있으면 갱신, 없으면 새로 생성 (upsert)
         MeetingParticipant p = meetingParticipantJpaRepository
                 .findByMeeting_IdAndUser_Id(meetingId, userId)
-                .orElseGet(MeetingParticipant::new);
+                .orElse(null);
+
+        // ✅ 이미 JOINED면 초대(리셋) 금지: 그대로 반환
+        if (p != null && "JOINED".equals(p.getStatus())) {
+            return p;
+        }
+
+        // 없으면 새로
+        if (p == null) p = new MeetingParticipant();
 
         p.setMeeting(meeting);
         p.setUser(user);
-        p.setEmail(email);
-        p.setRole("PARTICIPANT");  // 🔥 게스트는 항상 PARTICIPANT
+        p.setDisplayName(userService.convertToPrincipalDto(user).getName());
+        p.setEmail(userService.convertToPrincipalDto(user).getEmail());
+        p.setRole("PARTICIPANT");
         p.setStatus("INVITED");
 
         // 초대/등록 시점이므로 세션 정보 초기화
@@ -112,15 +137,16 @@ public class MeetingService {
         return meetingParticipantJpaRepository.save(p);
     }
 
+
     /**
      * 공통: 현재 시간 기준으로 회의 상태 갱신
-     *
+     * <p>
      * - CANCELED / FINISHED 는 건들지 않음
      * - endAt + 10분이 지나면 FINISHED
      * - lastEmptyAt + 30분이 지나면 FINISHED
      *
      * @return true  : 이 호출에서 FINISHED 로 변경됨
-     *         false : 상태 변화 없음
+     * false : 상태 변화 없음
      */
     private boolean refreshMeetingStatus(Meeting meeting) {
         LocalDateTime now = LocalDateTime.now();
@@ -170,10 +196,11 @@ public class MeetingService {
     private String upsertParticipantAndIssueSessionKey(Meeting meeting, PrincipalDto principal) {
         LocalDateTime now = LocalDateTime.now();
 
-        // 기존 참가자 있으면 재사용, 없으면 새로 생성
         MeetingParticipant p = meetingParticipantJpaRepository
                 .findByMeeting_IdAndUser_Id(meeting.getId(), principal.getId())
                 .orElseGet(MeetingParticipant::new);
+
+        boolean wasJoined = "JOINED".equals(p.getStatus()) && p.getLeftAt() == null;
 
         String newSessionKey = UUID.randomUUID().toString();
 
@@ -181,13 +208,19 @@ public class MeetingService {
         p.setUser(userService.readUserById(principal.getId()));
         p.setEmail(principal.getEmail());
 
-        // 이미 HOST로 등록된 경우(role이 이미 있을 경우) 그대로 유지
+        String dn = principal.getName();
+        if (dn == null || dn.isBlank()) dn = principal.getEmail();
+        if (dn == null || dn.isBlank()) dn = "참가자";
+        p.setDisplayName(dn);
+
         if (p.getRole() == null) {
             p.setRole("PARTICIPANT");
         }
 
         p.setStatus("JOINED");
-        p.setJoinedAt(Timestamp.valueOf(now));
+        if (!wasJoined) {
+            p.setJoinedAt(Timestamp.valueOf(now));
+        }
         p.setLeftAt(null);
 
         p.setSessionKey(newSessionKey);
@@ -195,13 +228,15 @@ public class MeetingService {
 
         meetingParticipantJpaRepository.save(p);
 
-        // 회의 상태를 진행 중으로
         if (!MeetingStatus.IN_PROGRESS.equals(meeting.getStatus())) {
             meeting.setStatus(MeetingStatus.IN_PROGRESS);
         }
-        meeting.setLastEmptyAt(null); // 방이 비어있지 않음
+        meeting.setLastEmptyAt(null);
         meeting.setUpdatedAt(Timestamp.valueOf(now));
         meetingJpaRepository.save(meeting);
+
+        // ✅ SYSTEM / presence broadcast는 여기서 하지 않음
+        // (joinMeeting에서 INVITED -> JOINED 전이 기준으로만 1회 처리)
 
         return newSessionKey;
     }
@@ -211,21 +246,41 @@ public class MeetingService {
      * 즉시 회의 생성.
      */
     @Transactional
-    public MeetingSimpleResDto createInstantMeeting(PrincipalDto principal) {
+    public MeetingSimpleResDto createInstantMeeting(CreateMeetingReqDto reqDto, PrincipalDto principal) {
+        validateCreatePermission(principal);
         User host = userService.readUserById(principal.getId());
+
+        LocalDateTime now = LocalDateTime.now();
+
+        // 1) startAt 기본값: now
+        Timestamp startAt = (reqDto != null && reqDto.getStartAt() != null)
+                ? reqDto.getStartAt()
+                : Timestamp.valueOf(now);
+
+        // 2) endAt 기본값: startAt + 1시간
+        Timestamp endAt = (reqDto != null && reqDto.getEndAt() != null)
+                ? reqDto.getEndAt()
+                : Timestamp.valueOf(startAt.toLocalDateTime().plusHours(1));
+
+        // 3) 검증
+        if (endAt.before(startAt) || endAt.equals(startAt)) {
+            throw new CustomRestfullException("종료 시간이 시작 시간보다 빠르거나 같을 수 없습니다.", HttpStatus.BAD_REQUEST);
+        }
+
+        // 4) title optional
+        String title = (reqDto != null) ? reqDto.getTitle() : null;
+        if (title == null || title.isBlank()) title = "즉시 회의";
 
         Meeting meeting = new Meeting();
         meeting.setHost(host);
         meeting.setType("INSTANT");
+        meeting.setTitle(title);
+        meeting.setDescription((reqDto != null) ? reqDto.getDescription() : null);
 
-        meeting.setTitle("즉시 회의"); // 나중에 요청에서 제목을 받을 수도 있음
-        meeting.setDescription(null);
+        meeting.setStartAt(startAt);
+        meeting.setEndAt(endAt);
 
-        LocalDateTime now = LocalDateTime.now();
-        meeting.setStartAt(Timestamp.valueOf(now));
-        meeting.setEndAt(Timestamp.valueOf(now.plusHours(1)));
-
-        meeting.setStatus(MeetingStatus.IN_PROGRESS); // 즉시 회의는 바로 진행 중으로
+        meeting.setStatus(MeetingStatus.IN_PROGRESS);
         meeting.setRoomNumber(generateRoomNumber());
 
         meeting.setCreatedAt(Timestamp.valueOf(now));
@@ -233,62 +288,7 @@ public class MeetingService {
 
         Meeting saved = meetingJpaRepository.save(meeting);
 
-        // 주최자를 참가자 테이블에도 HOST로 등록 (초기 상태는 INVITED)
-        MeetingParticipant hostParticipant = new MeetingParticipant();
-        hostParticipant.setMeeting(saved);
-        hostParticipant.setUser(host);
-        hostParticipant.setEmail(principal.getEmail()); // PrincipalDto에 이메일 있으면 사용
-        hostParticipant.setRole("HOST");
-        hostParticipant.setStatus("INVITED");
-        meetingParticipantJpaRepository.save(hostParticipant);
-
-        // 응답 DTO 변환
-        MeetingSimpleResDto dto = new MeetingSimpleResDto();
-        dto.setMeetingId(saved.getId());
-        dto.setType(saved.getType());
-        dto.setTitle(saved.getTitle());
-        dto.setStartAt(saved.getStartAt().toLocalDateTime());
-        dto.setEndAt(saved.getEndAt().toLocalDateTime());
-        dto.setRoomNumber(saved.getRoomNumber());
-        dto.setStatus(saved.getStatus().name());
-
-        return dto;
-    }
-
-    /**
-     * 예약 회의 생성.
-     */
-    @Transactional
-    public MeetingSimpleResDto createScheduledMeeting(CreateMeetingReqDto reqDto, PrincipalDto principal) {
-        if (reqDto.getStartAt() == null || reqDto.getEndAt() == null) {
-            throw new CustomRestfullException("시작/종료 시간이 반드시 필요합니다.", HttpStatus.BAD_REQUEST);
-        }
-        if (reqDto.getEndAt().before(reqDto.getStartAt())) {
-            throw new CustomRestfullException("종료 시간이 시작 시간보다 빠를 수 없습니다.", HttpStatus.BAD_REQUEST);
-        }
-
-        User host = userService.readUserById(principal.getId());
-
-        Meeting meeting = new Meeting();
-        meeting.setHost(host);
-        meeting.setType("SCHEDULED");
-
-        meeting.setTitle(reqDto.getTitle());
-        meeting.setDescription(reqDto.getDescription());
-
-        meeting.setStartAt(reqDto.getStartAt());
-        meeting.setEndAt(reqDto.getEndAt());
-
-        meeting.setStatus(MeetingStatus.SCHEDULED);
-        meeting.setRoomNumber(generateRoomNumber());
-
-        LocalDateTime now = LocalDateTime.now();
-        meeting.setCreatedAt(Timestamp.valueOf(now));
-        meeting.setUpdatedAt(Timestamp.valueOf(now));
-
-        Meeting saved = meetingJpaRepository.save(meeting);
-
-        // 주최자를 참가자(HOST)로 등록 (초기 상태는 INVITED)
+        // HOST를 참가자 테이블에도 등록
         MeetingParticipant hostParticipant = new MeetingParticipant();
         hostParticipant.setMeeting(saved);
         hostParticipant.setUser(host);
@@ -305,23 +305,149 @@ public class MeetingService {
         dto.setEndAt(saved.getEndAt().toLocalDateTime());
         dto.setRoomNumber(saved.getRoomNumber());
         dto.setStatus(saved.getStatus().name());
-
         return dto;
     }
 
+
     /**
-     * 내가 주최한 회의 목록 조회.
+     * 예약 회의 생성.
+     */
+    @Transactional
+    public MeetingSimpleResDto createScheduledMeeting(CreateMeetingReqDto reqDto, PrincipalDto principal) {
+        validateCreatePermission(principal);
+        if (reqDto.getStartAt() == null || reqDto.getEndAt() == null) {
+            throw new CustomRestfullException("시작/종료 시간이 반드시 필요합니다.", HttpStatus.BAD_REQUEST);
+        }
+        if (reqDto.getEndAt().before(reqDto.getStartAt())) {
+            throw new CustomRestfullException("종료 시간이 시작 시간보다 빠를 수 없습니다.", HttpStatus.BAD_REQUEST);
+        }
+
+        // ✅ 예약 회의는 참여자 리스트 자체가 필수
+        if (reqDto.getParticipantUserIds() == null || reqDto.getParticipantUserIds().isEmpty()) {
+            throw new CustomRestfullException("예약 회의는 초대할 참여자 목록이 필요합니다.", HttpStatus.BAD_REQUEST);
+        }
+
+        Integer hostId = principal.getId();
+
+        // ✅ host 제외 + null 제외 + 중복 제거
+        Set<Integer> uniqueIds = new LinkedHashSet<>();
+        for (Integer id : reqDto.getParticipantUserIds()) {
+            if (id == null) continue;
+            if (id.equals(hostId)) continue;
+            uniqueIds.add(id);
+        }
+
+        // ✅ 실질 초대 대상이 없으면 실패 (host만 넣은 케이스)
+        if (uniqueIds.isEmpty()) {
+            throw new CustomRestfullException("예약 회의는 호스트를 제외한 참여자를 1명 이상 초대해야 합니다.", HttpStatus.BAD_REQUEST);
+        }
+
+        // ✅ 존재 유저 검증(엄격 모드)
+        for (Integer pid : uniqueIds) {
+            userService.readUserById(pid); // 없으면 예외
+        }
+
+        User host = userService.readUserById(hostId);
+
+        Meeting meeting = new Meeting();
+        meeting.setHost(host);
+        meeting.setType("SCHEDULED");
+        meeting.setTitle(reqDto.getTitle());
+        meeting.setDescription(reqDto.getDescription());
+        meeting.setStartAt(reqDto.getStartAt());
+        meeting.setEndAt(reqDto.getEndAt());
+        meeting.setStatus(MeetingStatus.SCHEDULED);
+        meeting.setRoomNumber(generateRoomNumber());
+
+        LocalDateTime now = LocalDateTime.now();
+        meeting.setCreatedAt(Timestamp.valueOf(now));
+        meeting.setUpdatedAt(Timestamp.valueOf(now));
+
+        Meeting saved = meetingJpaRepository.save(meeting);
+
+        // HOST 등록
+        MeetingParticipant hostParticipant = new MeetingParticipant();
+        hostParticipant.setMeeting(saved);
+        hostParticipant.setUser(host);
+        hostParticipant.setEmail(principal.getEmail());
+        hostParticipant.setRole("HOST");
+        hostParticipant.setStatus("INVITED");
+        meetingParticipantJpaRepository.save(hostParticipant);
+
+        // 초대 등록
+        for (Integer pid : uniqueIds) {
+            addGuestParticipant(saved.getId(), null, pid);
+        }
+
+        MeetingSimpleResDto dto = new MeetingSimpleResDto();
+        dto.setMeetingId(saved.getId());
+        dto.setType(saved.getType());
+        dto.setTitle(saved.getTitle());
+        dto.setStartAt(saved.getStartAt().toLocalDateTime());
+        dto.setEndAt(saved.getEndAt().toLocalDateTime());
+        dto.setRoomNumber(saved.getRoomNumber());
+        dto.setStatus(saved.getStatus().name());
+        return dto;
+    }
+    @Transactional
+    public void inviteMoreParticipants(Integer meetingId, List<Integer> participantUserIds, PrincipalDto principal) {
+        validateCreatePermission(principal); // ✅ 기존 권한 정책 재사용 (호스트만 허용이면 여기서 컷)
+
+        if (meetingId == null) {
+            throw new CustomRestfullException("meetingId가 필요합니다.", HttpStatus.BAD_REQUEST);
+        }
+        if (participantUserIds == null || participantUserIds.isEmpty()) {
+            throw new CustomRestfullException("초대할 참여자 목록이 필요합니다.", HttpStatus.BAD_REQUEST);
+        }
+
+        Meeting meeting = meetingJpaRepository.findById(meetingId)
+                .orElseThrow(() -> new CustomRestfullException("meeting not found", HttpStatus.NOT_FOUND));
+
+        Integer hostId = meeting.getHost() != null ? meeting.getHost().getId() : null;
+
+        // ✅ host 제외 + null 제외 + 중복 제거 (생성 로직과 동일)
+        Set<Integer> uniqueIds = new LinkedHashSet<>();
+        for (Integer id : participantUserIds) {
+            if (id == null) continue;
+            if (hostId != null && id.equals(hostId)) continue;
+            uniqueIds.add(id);
+        }
+
+        if (uniqueIds.isEmpty()) {
+            throw new CustomRestfullException("호스트를 제외한 참여자를 1명 이상 선택하세요.", HttpStatus.BAD_REQUEST);
+        }
+
+        // ✅ 존재 유저 검증(생성 로직과 동일: 엄격 모드)
+        for (Integer pid : uniqueIds) {
+            userService.readUserById(pid);
+        }
+
+        // ✅ 핵심: 생성 때 쓰는 addGuestParticipant 재사용
+        for (Integer pid : uniqueIds) {
+            addGuestParticipant(meetingId, null, pid);
+        }
+    }
+
+    /**
+     * 내가 참여한 회의 목록 조회.
      */
     @Transactional(readOnly = true)
     public List<MeetingSimpleResDto> readMyMeetings(PrincipalDto principal) {
+
+        var now = Timestamp.valueOf(LocalDateTime.now());
+
+        var statuses = List.of(MeetingStatus.SCHEDULED, MeetingStatus.IN_PROGRESS);
+
         List<MeetingParticipant> participants =
-                meetingParticipantJpaRepository
-                        .findByUser_IdOrderByMeeting_StartAtDesc(principal.getId());
+                meetingParticipantJpaRepository.findMyActiveOrScheduledMeetings(
+                        principal.getId(),
+                        now,
+                        statuses
+                );
 
         return participants.stream()
                 .map(p -> {
-                    Meeting m = p.getMeeting();  // 핵심: Participant → Meeting 꺼내기
-
+                    Meeting m = p.getMeeting();
                     MeetingSimpleResDto dto = new MeetingSimpleResDto();
                     dto.setMeetingId(m.getId());
                     dto.setType(m.getType());
@@ -332,8 +458,10 @@ public class MeetingService {
                     dto.setStatus(m.getStatus().name());
                     return dto;
                 })
-                .collect(Collectors.toList());
+                .toList();
     }
+
+
 
     /**
      * 회의 취소 (주최자만 가능).
@@ -366,7 +494,6 @@ public class MeetingService {
     public MeetingJoinInfoResDto readJoinInfo(Integer meetingId, PrincipalDto principal) {
         Meeting meeting = findById(meetingId);
 
-        // 1) 공통 상태 갱신
         boolean finished = refreshMeetingStatus(meeting);
 
         if (MeetingStatus.CANCELED.equals(meeting.getStatus())) {
@@ -377,8 +504,26 @@ public class MeetingService {
         }
 
         LocalDateTime now = LocalDateTime.now();
-
         validateJoinWindow(meeting, now);
+
+        Integer userId = principal.getId();
+
+        String userRole = principal.getUserRole() != null ? principal.getUserRole().toUpperCase() : "";
+        boolean isStaffOrAdmin = "STAFF".equals(userRole) || "ADMIN".equals(userRole);
+
+        Integer hostUserId = meeting.getHost() != null ? meeting.getHost().getId() : null;
+        boolean isHost = hostUserId != null && hostUserId.equals(userId);
+
+        // ✅ SCHEDULED 접근 제어(초대 체크) - joinInfo 단계에서 막기
+        if ("SCHEDULED".equals(meeting.getType()) && !isStaffOrAdmin && !isHost) {
+            boolean invited = meetingParticipantJpaRepository
+                    .findByMeeting_IdAndUser_Id(meetingId, userId)
+                    .isPresent();
+
+            if (!invited) {
+                throw new CustomRestfullException("초대된 사용자만 입장할 수 있습니다.", HttpStatus.FORBIDDEN);
+            }
+        }
 
         LocalDateTime start = meeting.getStartAt().toLocalDateTime();
         LocalDateTime end = meeting.getEndAt().toLocalDateTime();
@@ -390,29 +535,37 @@ public class MeetingService {
         dto.setStartAt(start);
         dto.setEndAt(end);
         dto.setStatus(meeting.getStatus().name());
-        dto.setUserId(principal.getId());
+        dto.setUserId(userId);
         dto.setUserRole(principal.getUserRole());
         dto.setDisplayName(principal.getName());
 
-        // 🔹 인스턴트 회의면 => 여기서 바로 참가자 등록 + 세션 키 발급
-        if ("INSTANT".equals(meeting.getType())) {
-            String sessionKey = upsertParticipantAndIssueSessionKey(meeting, principal);
-            dto.setSessionKey(sessionKey);
-        } else {
-            dto.setSessionKey(null); // 예약 회의는 여기서 자동 참가하지 않음
-        }
+        dto.setHostUserId(hostUserId);
+        dto.setIsHost(isHost);
+
+        // ✅ sessionKey는 joinMeeting에서 발급 (joinInfo에서는 null)
+        dto.setSessionKey(null);
 
         return dto;
     }
 
+
     /**
      * 예약 회의 등의 명시적 "참가하기" 버튼용
+     *
+     * 정책:
+     * 1) INSTANT  : 누구나 입장 가능
+     * 2) SCHEDULED: 초대된 사용자만 입장 가능
+     * 3) STAFF/ADMIN: 어떤 회의든 초대 없이 입장 가능
+     *
+     * 시스템 메시지 정책(핵심):
+     * - DB에서 이전 status가 JOINED가 아니었던 경우에만 1회 "입장했습니다" 출력
+     *   (INVITED -> JOINED, null -> JOINED 모두 포함)
      */
     @Transactional
     public String joinMeeting(Integer meetingId, PrincipalDto principal) {
         Meeting meeting = findById(meetingId);
-        boolean finished = refreshMeetingStatus(meeting);
 
+        boolean finished = refreshMeetingStatus(meeting);
         if (MeetingStatus.CANCELED.equals(meeting.getStatus())) {
             throw new CustomRestfullException("취소된 회의입니다.", HttpStatus.BAD_REQUEST);
         }
@@ -420,41 +573,147 @@ public class MeetingService {
             throw new CustomRestfullException("이미 종료된 회의입니다.", HttpStatus.BAD_REQUEST);
         }
 
+        // ✅ 시간 정책은 지금은 그대로 유지(1000분) - Step1 나중
+        validateJoinWindow(meeting, LocalDateTime.now());
+
+        final Integer userId = principal.getId();
+
+        // displayName 보정
+        String dn = principal.getName();
+        if (dn == null || dn.isBlank()) dn = principal.getEmail();
+        if (dn == null || dn.isBlank()) dn = "참가자";
+
+        // 유저 역할(권한용)
+        String userRole = principal.getUserRole() != null ? principal.getUserRole().toUpperCase() : "";
+        boolean isStaffOrAdmin = "STAFF".equals(userRole) || "ADMIN".equals(userRole);
+
+        // 회의 HOST 여부(회의 엔티티 기준)
+        boolean isHost = meeting.getHost() != null && meeting.getHost().getId().equals(userId);
+
+        // ===============================
+        // 1) 접근 제어: SCHEDULED는 초대 or STAFF/ADMIN or HOST만
+        // ===============================
+        if ("SCHEDULED".equals(meeting.getType()) && !isStaffOrAdmin && !isHost) {
+            boolean invited = meetingParticipantJpaRepository
+                    .findByMeeting_IdAndUser_Id(meetingId, userId)
+                    .isPresent();
+
+            if (!invited) {
+                throw new CustomRestfullException("초대된 사용자만 입장할 수 있습니다.", HttpStatus.FORBIDDEN);
+            }
+        }
+
+        // ===============================
+        // 2) Presence role 결정 (메모리 기준 단일진실)
+        // ===============================
+        String presenceRole;
+        if (isHost) presenceRole = "HOST";
+        else if (isStaffOrAdmin) presenceRole = "STAFF";
+        else presenceRole = "PARTICIPANT";
+
+        // ===============================
+        // 3) DB upsert (목록/기록용)
+        //    - 시스템 메시지 판정은 "DB 이전 status" 기준
+        // ===============================
         LocalDateTime now = LocalDateTime.now();
 
-        validateJoinWindow(meeting, now);
+        MeetingParticipant p = meetingParticipantJpaRepository
+                .findByMeeting_IdAndUser_Id(meetingId, userId)
+                .orElseGet(MeetingParticipant::new);
 
-        // 🔹 공통 헬퍼 사용
-        return upsertParticipantAndIssueSessionKey(meeting, principal);
+        String prevStatus = p.getStatus();                 // ✅ 이전 상태
+        boolean shouldSystemJoinMsg = !"JOINED".equals(prevStatus); // ✅ 이전이 JOINED 아니면 1회
+
+        p.setMeeting(meeting);
+        p.setUser(userService.readUserById(userId));
+        p.setEmail(principal.getEmail());
+        p.setDisplayName(dn);
+
+        // status는 JOINED로 고정
+        p.setStatus("JOINED");
+
+        // joinedAt은 최초 1회만 기록 (DB 기준)
+        if (p.getJoinedAt() == null) {
+            p.setJoinedAt(Timestamp.valueOf(now));
+        }
+
+        p.setLeftAt(null);
+        p.setLastActiveAt(Timestamp.valueOf(now));
+        p.setSessionKey(null);
+
+        // DB role은 최소 유지 (HOST만 확실히)
+        if (isHost) p.setRole("HOST");
+        else p.setRole("PARTICIPANT");
+
+        meetingParticipantJpaRepository.save(p);
+
+        // 회의 상태 갱신
+        if (!MeetingStatus.IN_PROGRESS.equals(meeting.getStatus())) {
+            meeting.setStatus(MeetingStatus.IN_PROGRESS);
+        }
+        meeting.setLastEmptyAt(null);
+        meeting.setUpdatedAt(Timestamp.valueOf(now));
+        meetingJpaRepository.save(meeting);
+
+        // ===============================
+        // 4) PresenceStore 등록 + JOIN 브로드캐스트
+        // ===============================
+        String sessionKey = presenceStore.joinOrReplace(meetingId, userId, dn, presenceRole);
+
+        PresenceEventDto payload = PresenceEventDto.builder()
+                .type("JOIN")
+                .meetingId(meetingId)
+                .userId(userId)
+                .displayName(dn)
+                .role(presenceRole)
+                .joined(true)
+                .build();
+
+        messagingTemplate.convertAndSend(
+                String.format("/sub/meetings/%d/presence", meetingId),
+                payload
+        );
+
+        // ===============================
+        // 5) 시스템 메시지: DB에서 JOINED가 아니었던 최초 1회만
+        // ===============================
+        if (shouldSystemJoinMsg) {
+            ChatMessageDto systemMsg = meetingChatService.saveSystemMessage(
+                    meetingId,
+                    dn + " 님이 회의에 입장했습니다."
+            );
+            messagingTemplate.convertAndSend(
+                    String.format("/sub/meetings/%d/chat", meetingId),
+                    systemMsg
+            );
+        }
+
+        return sessionKey;
     }
+
+
+
+
 
     @Transactional
     public void leaveMeeting(Integer meetingId, PrincipalDto principal) {
-        Meeting meeting = findById(meetingId);
+        Integer userId = principal.getId();
+        presenceStore.leave(meetingId, userId);
+        mediaStateStore.remove(meetingId, userId); // 미디어 상태도 삭제
 
-        MeetingParticipant p =
-                meetingParticipantJpaRepository
-                        .findByMeeting_IdAndUser_Id(meetingId, principal.getId())
-                        .orElse(null);
-        if (p == null) {
-            return;
-        }
+        PresenceEventDto payload = PresenceEventDto.builder()
+                .type("LEAVE")
+                .meetingId(meetingId)
+                .userId(userId)
+                .joined(false)
+                .build();
 
-        p.setStatus("LEFT");
-        p.setLeftAt(Timestamp.valueOf(LocalDateTime.now()));
-        meetingParticipantJpaRepository.save(p);
-
-        // 이 회의에 JOINED 상태의 사람이 아직 있는지 확인
-        boolean hasJoined =
-                meetingParticipantJpaRepository.existsByMeeting_IdAndStatus(meetingId, "JOINED");
-
-        if (!hasJoined) {
-            // 아무도 없으면 방이 '비어 있음'
-            meeting.setLastEmptyAt(Timestamp.valueOf(LocalDateTime.now()));
-            meeting.setUpdatedAt(Timestamp.valueOf(LocalDateTime.now()));
-            meetingJpaRepository.save(meeting);
-        }
+        messagingTemplate.convertAndSend(
+                String.format("/sub/meetings/%d/presence", meetingId),
+                payload
+        );
     }
+
 
     @Transactional
     public MeetingPingResDto ping(Integer meetingId,
@@ -473,33 +732,147 @@ public class MeetingService {
             return MeetingPingResDto.inactive("MEETING_FINISHED");
         }
 
-        // 2) 내 참가 정보 조회
-        MeetingParticipant p = meetingParticipantJpaRepository
-                .findByMeeting_IdAndUser_Id(meetingId, principal.getId())
-                .orElse(null);
+        Integer userId = principal.getId();
 
-        if (p == null) {
+        // 메모리 기반 유효성 체크
+        com.green.university.presence.PresenceStore.State s = presenceStore.get(meetingId, userId);
+        if (s == null) {
             return MeetingPingResDto.inactive("NOT_JOINED");
         }
 
-        // 3) 세션키 비교 (다른 브라우저에서 재접속한 경우)
-        String serverSessionKey = p.getSessionKey();
-        if (serverSessionKey != null
-                && clientSessionKey != null
-                && !serverSessionKey.equals(clientSessionKey)) {
-
-            // 이 브라우저는 더 이상 유효하지 않은 옛날 세션
+        boolean ok = presenceStore.heartbeat(meetingId, userId, clientSessionKey);
+        if (!ok) {
             return MeetingPingResDto.inactive("SESSION_REPLACED");
         }
-
-        // 4) 여기까지 왔으면 "유효한 현재 세션" → heartbeat 갱신
-        p.setLastActiveAt(Timestamp.valueOf(now));
-        meetingParticipantJpaRepository.save(p);
 
         MeetingPingResDto dto = new MeetingPingResDto();
         dto.setActive(true);
         dto.setReason(null);
         return dto;
     }
+
+
+    @Transactional(readOnly = true)
+    public void broadcastPresenceSync(Integer meetingId) {
+        List<PresenceStore.State> list = presenceStore.list(meetingId);
+
+        List<PresenceEventDto.ParticipantDto> participants = list.stream()
+                .map(s -> PresenceEventDto.ParticipantDto.builder()
+                        .userId(s.getUserId())
+                        .displayName(s.getDisplayName())
+                        .role(s.getRole())
+                        .joined(true)
+                        .build())
+                .toList();
+
+        PresenceEventDto payload = PresenceEventDto.builder()
+                .type("SYNC")
+                .meetingId(meetingId)
+                .participants(participants)
+                .build();
+
+        messagingTemplate.convertAndSend(
+                String.format("/sub/meetings/%d/presence", meetingId),
+                payload
+        );
+
+        log.debug("[Presence] SYNC(sent from memory) meetingId={}, size={}", meetingId, participants.size());
+
+        // presence SYNC 후 각 참가자의 미디어 상태도 방송하여 새로 입장한 사용자가 즉시 상태를 알 수 있게 함
+        broadcastMediaStateSync(meetingId);
+    }
+
+    @Transactional(readOnly = true)
+    public void broadcastMediaStateSync(Integer meetingId) {
+        List<MediaStateStore.State> list = mediaStateStore.list(meetingId);
+        if (list == null || list.isEmpty()) return;
+
+        for (MediaStateStore.State s : list) {
+            if (s == null) continue;
+            MediaStateSignalMessageDto msg = new MediaStateSignalMessageDto();
+            msg.setMeetingId(meetingId);
+            msg.setUserId(s.getUserId());
+            msg.setDisplay(s.getDisplay());
+            msg.setAudio(s.getAudio());
+            msg.setVideo(s.getVideo());
+            msg.setVideoDeviceLost(s.getVideoDeviceLost());
+            msg.setType("MEDIA_STATE");
+
+            messagingTemplate.convertAndSend(
+                    String.format("/sub/meetings/%d/signals", meetingId),
+                    msg
+            );
+        }
+    }
+
+    private void broadcastPresenceJoin(Integer meetingId, MeetingParticipant p) {
+        PresenceEventDto payload = PresenceEventDto.builder()
+                .type("JOIN")
+                .meetingId(meetingId)
+                .userId(p.getUser().getId())
+                .displayName(
+                        (p.getDisplayName() != null && !p.getDisplayName().isBlank())
+                                ? p.getDisplayName()
+                                : (p.getEmail() != null ? p.getEmail() : "참가자")
+                )
+                .role(p.getRole() != null ? p.getRole() : "PARTICIPANT")
+                .joined(true)
+                .build();
+
+        messagingTemplate.convertAndSend(
+                String.format("/sub/meetings/%d/presence", meetingId),
+                payload
+        );
+    }
+
+    private void broadcastPresenceLeave(Integer meetingId, Integer userId) {
+        PresenceEventDto payload = PresenceEventDto.builder()
+                .type("LEAVE")
+                .meetingId(meetingId)
+                .userId(userId)
+                .joined(false)
+                .build();
+
+        messagingTemplate.convertAndSend(
+                String.format("/sub/meetings/%d/presence", meetingId),
+                payload
+        );
+    }
+    @Transactional
+    public void leaveKeepalive(Integer meetingId, String sessionKey) {
+        Integer userId = presenceStore.findUserIdBySessionKey(meetingId, sessionKey);
+        if (userId == null) return;
+        presenceStore.leave(meetingId, userId);
+        mediaStateStore.remove(meetingId, userId); // 미디어 상태도 삭제
+
+        PresenceEventDto payload = PresenceEventDto.builder()
+                .type("LEAVE")
+                .meetingId(meetingId)
+                .userId(userId)
+                .joined(false)
+                .build();
+
+        messagingTemplate.convertAndSend("/sub/meetings/" + meetingId + "/presence", payload);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ParticipantResDto> readParticipants(Integer meetingId) {
+        return meetingParticipantJpaRepository.findByMeeting_Id(meetingId)
+                .stream()
+                .map(p -> ParticipantResDto.builder()
+                        .userId(p.getUser().getId())
+                        .name(
+                                p.getDisplayName() != null && !p.getDisplayName().isBlank()
+                                        ? p.getDisplayName()
+                                        : p.getEmail() != null ? p.getEmail() : "참가자"
+                        )
+                        .role(p.getRole())
+                        .inviteStatus(p.getStatus())
+                        .build()
+                )
+                .toList();
+    }
+
+
 
 }

@@ -4,7 +4,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.stream.Collectors;
 
+import com.green.university.dto.response.DepartmentResponseDto;
+import com.green.university.repository.model.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -22,10 +25,6 @@ import com.green.university.dto.CollegeFormDto;
 import com.green.university.dto.DepartmentFormDto;
 import com.green.university.dto.RoomFormDto;
 import com.green.university.dto.SubjectFormDto;
-import com.green.university.repository.model.College;
-import com.green.university.repository.model.Department;
-import com.green.university.repository.model.Room;
-import com.green.university.repository.model.Subject;
 import com.green.university.service.AdminService;
 
 /**
@@ -38,6 +37,26 @@ import com.green.university.service.AdminService;
 public class AdminController {
 	@Autowired
 	private AdminService adminService;
+
+    /**
+     * 모든 교수 목록 조회 (인증된 사용자용)
+     * GET /api/admin/professors/all
+     */
+    @GetMapping("/professors/all")
+    public ResponseEntity<List<Professor>> getAllProfessors() {
+        List<Professor> professors = adminService.readAllProfessors();
+        return ResponseEntity.ok(professors);
+    }
+
+    /**
+     * 모든 강의실 목록 조회 (인증된 사용자용)
+     * GET /api/admin/rooms/all
+     */
+    @GetMapping("/rooms/all")
+    public ResponseEntity<List<Room>> getAllRooms() {
+        List<Room> rooms = adminService.readRoom();
+        return ResponseEntity.ok(rooms);
+    }
 
 	// 단과대 페이지
     @GetMapping("/college")
@@ -203,4 +222,25 @@ public class AdminController {
         return ResponseEntity.ok().build();
     }
 
+    /**
+     * 모든 학과 목록 조회 (인증된 사용자용)
+     * GET /api/admin/departments/all
+     */
+    @GetMapping("/departments/all")
+    public ResponseEntity<List<DepartmentResponseDto>> getAllDepartments() {
+        List<Department> departments = adminService.readDepartment();
+        List<DepartmentResponseDto> dtoList = departments.stream()
+                .map(DepartmentResponseDto::fromEntity)
+                .collect(Collectors.toList());
+        return ResponseEntity.ok(dtoList);
+    }
+    /**
+     * 모든 단과대 목록 조회 (인증된 사용자용)
+     * GET /api/admin/colleges/all
+     */
+    @GetMapping("/colleges/all")
+    public ResponseEntity<List<College>> getAllColleges() {
+        List<College> colleges = adminService.readCollege();
+        return ResponseEntity.ok(colleges);
+    }
 }

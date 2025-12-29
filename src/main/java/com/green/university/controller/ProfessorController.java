@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.green.university.dto.GradingPolicyDto;
 import com.green.university.dto.SyllaBusFormDto;
 import com.green.university.dto.UpdateStudentGradeDto;
 import com.green.university.repository.model.Student;
@@ -63,8 +64,8 @@ public class ProfessorController {
         List<Subject> subjectList = professorService.selectSubjectBySemester(
                 new SubjectPeriodForProfessorDto(
                         professorId,
-                        Define.CURRENT_YEAR,
-                        Define.CURRENT_SEMESTER
+                        Define.getCurrentYear(),
+                        Define.getCurrentSemester()
                 )
         );
 
@@ -107,6 +108,23 @@ public class ProfessorController {
     public ResponseEntity<Map<String, Object>> subjectStudentList(@PathVariable Integer subjectId) {
         List<StuSubResponseDto> studentList = professorService.selectBySubjectId(subjectId);
         Subject subject = professorService.selectSubjectById(subjectId);
+        GradingPolicyDto policy = professorService.getGradingPolicy(subjectId);
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("studentList", studentList);
+        body.put("subject", subject);
+        body.put("policy", policy);
+        return ResponseEntity.ok(body);
+    }
+
+    /**
+     * ✅ 해당 과목의 실제 수강신청한 학생만 조회 (stu_sub_tb 기준)
+     * 예비 수강신청이 아닌 실제 수강신청한 학생만 반환
+     */
+    @GetMapping("/subject/{subjectId}/enrolled")
+    public ResponseEntity<Map<String, Object>> enrolledStudentList(@PathVariable Integer subjectId) {
+        List<StuSubResponseDto> studentList = professorService.selectEnrolledStudentsBySubjectId(subjectId);
+        Subject subject = professorService.selectSubjectById(subjectId);
 
         Map<String, Object> body = new HashMap<>();
         body.put("studentList", studentList);
@@ -147,6 +165,30 @@ public class ProfessorController {
 
         Map<String, String> body = new HashMap<>();
         body.put("message", "성적이 수정되었습니다.");
+        return ResponseEntity.ok(body);
+    }
+
+    /**
+     * 성적 가중치 정책 조회
+     */
+    @GetMapping("/subject/{subjectId}/grading-policy")
+    public ResponseEntity<GradingPolicyDto> getGradingPolicy(@PathVariable Integer subjectId) {
+        GradingPolicyDto policy = professorService.getGradingPolicy(subjectId);
+        return ResponseEntity.ok(policy);
+    }
+
+    /**
+     * 성적 가중치 정책 저장
+     */
+    @PutMapping("/subject/{subjectId}/grading-policy")
+    public ResponseEntity<Map<String, String>> saveGradingPolicy(
+            @PathVariable Integer subjectId,
+            @RequestBody GradingPolicyDto policy) {
+        
+        professorService.saveGradingPolicy(subjectId, policy);
+        
+        Map<String, String> body = new HashMap<>();
+        body.put("message", "성적 가중치 정책이 저장되었습니다.");
         return ResponseEntity.ok(body);
     }
 
