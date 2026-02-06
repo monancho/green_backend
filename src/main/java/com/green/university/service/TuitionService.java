@@ -2,7 +2,10 @@ package com.green.university.service;
 
 import java.util.List;
 
-import com.green.university.repository.*;
+import com.green.university.repository.StuSchJpaRepository;
+import com.green.university.repository.TuitionJpaRepository;
+import com.green.university.repository.CollTuitJpaRepository;
+import com.green.university.repository.StudentJpaRepository;
 import com.green.university.repository.model.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -29,12 +32,6 @@ public class TuitionService {
     private StudentJpaRepository studentJpaRepository;
 
     @Autowired
-    private StuSubDetailJpaRepository stuSubDetailJpaRepository;
-
-    @Autowired
-    private AIAnalysisResultService aiAnalysisResultService;
-
-    @Autowired
     private StuStatService stuStatService;
 
     @Autowired
@@ -45,9 +42,6 @@ public class TuitionService {
 
     @Autowired
     private GradeService gradeService;
-
-    @Autowired
-    private ScholarshipJpaRepository scholarshipJpaRepository;
 
     /**
      * @param studentId (principal의 id와 동일)
@@ -79,94 +73,56 @@ public class TuitionService {
                 .orElse(null);
     }
 
-    // TuitionService에 추가
-    @Transactional
-    public void updateStudentSemester(Integer studentId) {
-        Student student = studentJpaRepository.findById(studentId)
-                .orElseThrow(() -> new CustomRestfullException(
-                        "학생 정보를 찾을 수 없습니다.", HttpStatus.INTERNAL_SERVER_ERROR));
-
-        // 현재 학기가 2학기이고, 학생이 1학기라면 → 2학기로 업데이트
-        if (Define.getCurrentSemester() == 2 && student.getSemester() == 1) {
-            student.setSemester(2);
-            studentJpaRepository.save(student);
-        }
-        // 현재 학기가 1학기이고, 이전 학기가 2학기였다면 → 학년 올리고 1학기로
-        else if (Define.getCurrentSemester() == 1 && student.getSemester() == 2) {
-            student.setGrade(student.getGrade() + 1);
-            student.setSemester(1);
-            studentJpaRepository.save(student);
-        }
-    }
-
     /**
      * 장학금 유형 결정 (stu_sch_tb insert)
      */
     @Transactional
     public Integer createCurrentSchType(Integer studentId) {
 
+        // EmbeddedId 직접 셋팅
         StuSchId stuSchId = new StuSchId();
         stuSchId.setStudentId(studentId);
-        stuSchId.setSchYear(Define.getCurrentYear());
-        stuSchId.setSemester(Define.getCurrentSemester());
+        stuSchId.setSchYear(Define.CURRENT_YEAR);
+        stuSchId.setSemester(Define.CURRENT_SEMESTER);
 
         StuSch stuSch = new StuSch();
         stuSch.setId(stuSchId);
 
         Student studentEntity = userService.readStudent(studentId);
 
-        int currentSystemYear = Define.getCurrentYear();
-        int currentSystemSemester = Define.getCurrentSemester();
+        // 1학년 2학기 이상의 학생이라면
+        if (studentEntity.getGrade() > 1 || studentEntity.getSemester() == 2) {
 
-        // 1학년 1학기 학생은 무조건 2유형
-        if (studentEntity.getGrade() == 1 && studentEntity.getSemester() == 1) {
-            stuSch.setSchType(2);
-            Scholarship scholarship = scholarshipJpaRepository.findById(2)
-                    .orElse(null);
-            stuSch.setScholarship(scholarship);
+            GradeForScholarshipDto gradeDto;
 
-            stuSchJpaRepository.save(stuSch);
-            return 2;
-        }
+            if (Define.CURRENT_SEMESTER == 1) {
+                gradeDto = gradeService.readAvgGrade(
+                        studentId, Define.CURRENT_YEAR - 1, 2);
+            } else {
+                gradeDto = gradeService.readAvgGrade(
+                        studentId, Define.CURRENT_YEAR, 1);
+            }
 
-        // 직전 학기 계산
-        int prevYear = currentSystemYear;
-        int prevSemester = currentSystemSemester - 1;
+            // 직전 학기 성적이 없다면: 장학 없음 (레코드만 저장)
+            if (gradeDto == null) {
+                stuSchJpaRepository.save(stuSch);
+                return null;
+            }
 
-        if (prevSemester == 0) {
-            prevYear--;
-            prevSemester = 2;
-        }
+            Double avgGrade = gradeDto.getAvgGrade();
 
-        // 직전 학기 성적 조회
-        GradeForScholarshipDto gradeDto = gradeService.readAvgGrade(studentId, prevYear, prevSemester);
+            // 평점에 따라 장학금 유형 결정
+            if (avgGrade >= 4.2) {
+                stuSch.setSchType(1);
+            } else if (avgGrade >= 3.7) {
+                stuSch.setSchType(2);
+            }
+            // 3.7 미만이면 schType = null (장학 없음)
 
-        // 직전 학기 성적이 없다면: 장학 없음
-        if (gradeDto == null) {
-            stuSchJpaRepository.save(stuSch);
-            return null;
-        }
-
-        Double avgGrade = gradeDto.getAvgGrade();
-
-        System.out.println("학생 " + studentId + " 직전학기(" + prevYear + "-" + prevSemester + ") 평균: " + avgGrade);
-
-        // 평점에 따라 장학금 유형 결정
-        Integer schType = null;
-        if (avgGrade >= 4.2) {
-            schType = 1;
-            stuSch.setSchType(1);
-        } else if (avgGrade >= 3.7) {
-            schType = 2;
+        } else {
+            // 1학년 1학기 학생이라면 2유형 고정
             stuSch.setSchType(2);
         }
-
-        if (schType != null) {
-            Scholarship scholarship = scholarshipJpaRepository.findById(schType)
-                    .orElse(null);
-            stuSch.setScholarship(scholarship);
-        }
-
 
         stuSchJpaRepository.save(stuSch);
         return stuSch.getSchType();
@@ -180,8 +136,6 @@ public class TuitionService {
     @Transactional
     public int createTuition(Integer studentId) {
 
-        updateStudentSemester(studentId); // 진급
-
         // 1. 학적 상태가 '졸업' 또는 '자퇴'라면 생성하지 않음
         StuStat stuStatEntity = stuStatService.readCurrentStatus(studentId);
         if ("졸업".equals(stuStatEntity.getStatus())
@@ -193,18 +147,18 @@ public class TuitionService {
         List<BreakApp> breakAppList = breakAppService.readByStudentId(studentId);
         for (BreakApp b : breakAppList) {
             if ("승인".equals(b.getStatus())) {
-                if (b.getToYear() > Define.getCurrentYear()) {  // ✅ 수정
+                if (b.getToYear() > Define.CURRENT_YEAR) {
                     return 0;
-                } else if (b.getToYear() == Define.getCurrentYear()
-                        && b.getToSemester() >= Define.getCurrentSemester()) {  // ✅ 수정
+                } else if (b.getToYear() == Define.CURRENT_YEAR
+                        && b.getToSemester() >= Define.CURRENT_SEMESTER) {
                     return 0;
                 }
             }
         }
 
-// 3. 이미 해당 학기의 등록금 고지서가 존재한다면 생성하지 않음
+        // 3. 이미 해당 학기의 등록금 고지서가 존재한다면 생성하지 않음
         if (readByStudentIdAndSemester(
-                studentId, Define.getCurrentYear(), Define.getCurrentSemester()) != null) {  // ✅ 수정
+                studentId, Define.CURRENT_YEAR, Define.CURRENT_SEMESTER) != null) {
             return 0;
         }
 
@@ -222,7 +176,7 @@ public class TuitionService {
         Integer schAmount = 0;
         if (schType != null) {
             var stuSchOpt = stuSchJpaRepository.findWithScholarship(
-                    studentId, Define.getCurrentYear(), Define.getCurrentSemester());
+                    studentId, Define.CURRENT_YEAR, Define.CURRENT_SEMESTER);
 
             if (stuSchOpt.isPresent() && stuSchOpt.get().getScholarship() != null) {
                 Integer maxAmount = stuSchOpt.get().getScholarship().getMaxAmount();
@@ -236,8 +190,8 @@ public class TuitionService {
         // 7. EmbeddedId 생성 후 Tuition 엔티티 저장
         TuitionId tuitionId = new TuitionId();
         tuitionId.setStudentId(studentId);
-        tuitionId.setTuiYear(Define.getCurrentYear());      // ✅ 수정
-        tuitionId.setSemester(Define.getCurrentSemester()); // ✅ 수정
+        tuitionId.setTuiYear(Define.CURRENT_YEAR);
+        tuitionId.setSemester(Define.CURRENT_SEMESTER);
 
         Tuition tuition = new Tuition();
         tuition.setId(tuitionId);
@@ -257,12 +211,11 @@ public class TuitionService {
      */
     @Transactional
     public void updateStatus(Integer studentId) {
-        System.out.println("=== 등록금 납부 처리 시작 ===");
 
         TuitionId id = new TuitionId();
         id.setStudentId(studentId);
-        id.setTuiYear(Define.getCurrentYear());
-        id.setSemester(Define.getCurrentSemester());
+        id.setTuiYear(Define.CURRENT_YEAR);
+        id.setSemester(Define.CURRENT_SEMESTER);
 
         Tuition tuition = tuitionJpaRepository.findById(id)
                 .orElseThrow(() -> new CustomRestfullException(
@@ -270,53 +223,15 @@ public class TuitionService {
                         HttpStatus.INTERNAL_SERVER_ERROR
                 ));
 
+        // 상태만 true로 업데이트
         tuition.setStatus(true);
 
+        // 납부 성공 시, 휴학 상태인 학생이라면 재학 상태로 변경
         String status = stuStatService.readCurrentStatus(studentId).getStatus();
         if ("휴학".equals(status)) {
             stuStatService.updateStatus(studentId, "재학", "9999-01-01", null);
         }
-
-        // 등록금 납부 후 AI 분석 트리거 추가
-//        triggerAIAnalysisForTuition(studentId);
-
-        System.out.println("=== 등록금 납부 처리 완료 ===");
     }
-
-    /**
-     * ✅ 등록금 납부 후 해당 학생의 모든 과목 AI 분석
-     */
-//    private void triggerAIAnalysisForTuition(Integer studentId) {
-//        try {
-//            System.out.println("🤖 등록금 납부 후 AI 분석 시작: 학생 " + studentId);
-//
-//            List<StuSubDetail> enrollments = stuSubDetailJpaRepository
-//                    .findByStudentIdWithRelations(studentId);
-//
-//            int successCount = 0;
-//            for (StuSubDetail enrollment : enrollments) {
-//                try {
-//                    if (enrollment.getSubject() != null) {
-//                        aiAnalysisResultService.analyzeStudent(
-//                                studentId,
-//                                enrollment.getSubjectId(),
-//                                enrollment.getSubject().getSubYear(),
-//                                enrollment.getSubject().getSemester()
-//                        );
-//                        successCount++;
-//                    }
-//                } catch (Exception e) {
-//                    System.err.println("⚠️ 과목 " + enrollment.getSubjectId() + " AI 분석 실패: " + e.getMessage());
-//                }
-//            }
-//
-//            System.out.println("✅ 등록금 납부 후 AI 분석 완료: " + successCount + "개 과목");
-//
-//        } catch (Exception e) {
-//            System.err.println("⚠️ AI 분석 실패 (등록금 처리는 정상): " + e.getMessage());
-//            e.printStackTrace();
-//        }
-//    }
 
     /**
      * 학생 → 학과 → 단과대 → CollTuit 를 통해 등록금 금액 조회
@@ -336,6 +251,4 @@ public class TuitionService {
 
         return collTuitJpaRepository.findAmountByCollegeId(collegeId);
     }
-
-
 }

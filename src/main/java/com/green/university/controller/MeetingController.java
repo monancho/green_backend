@@ -5,7 +5,9 @@ import java.util.List;
 import java.util.Map;
 
 import com.green.university.dto.CreateMeetingReqDto;
-import com.green.university.dto.response.*;
+import com.green.university.dto.response.MeetingJoinInfoResDto;
+import com.green.university.dto.response.MeetingPingResDto;
+import com.green.university.dto.response.MeetingSimpleResDto;
 import jakarta.servlet.http.HttpSession;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +17,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 
+import com.green.university.dto.response.PrincipalDto;
 import com.green.university.handler.exception.CustomRestfullException;
 import com.green.university.service.MeetingService;
 import com.green.university.utils.Define;
@@ -38,44 +41,29 @@ public class MeetingController {
      * - 로그인된 사용자를 host로 하는 INSTANT 회의를 만든다.
      */
     @PostMapping("/instant")
-    public ResponseEntity<MeetingSimpleResDto> createInstantMeeting(
-            @RequestBody(required = false) CreateMeetingReqDto reqDto,
-            @AuthenticationPrincipal PrincipalDto principal
-    ) {
+    public ResponseEntity<MeetingSimpleResDto> createInstantMeeting(@AuthenticationPrincipal PrincipalDto principal) {
+
         if (principal == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
 
-        MeetingSimpleResDto dto = meetingService.createInstantMeeting(reqDto, principal);
+        MeetingSimpleResDto dto = meetingService.createInstantMeeting(principal);
         return ResponseEntity.ok(dto);
     }
 
-
     /**
-     * [POST] /api/meetings/scheduled
+     * [POST] /api/meetings
      * 예약 회의 생성.
+     * - 요청 바디에 제목, 설명, 시작/종료 시간을 담아 전송.
      */
-    @PostMapping("/scheduled")
-    public ResponseEntity<MeetingSimpleResDto> createScheduledMeetingV2(
-            @AuthenticationPrincipal PrincipalDto principal,
-            @RequestBody CreateMeetingReqDto reqDto
-    ) {
+    @PostMapping("")
+    public ResponseEntity<MeetingSimpleResDto> createScheduledMeeting( @AuthenticationPrincipal PrincipalDto principal,
+                                                                       @RequestBody CreateMeetingReqDto reqDto) {
         if (principal == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
         MeetingSimpleResDto dto = meetingService.createScheduledMeeting(reqDto, principal);
         return ResponseEntity.ok(dto);
-    }
-
-    @PostMapping("/{meetingId}/participants/invite")
-    public ResponseEntity<?> inviteMore(
-            @PathVariable Integer meetingId,
-            @RequestBody Map<String, List<Integer>> body,
-            @AuthenticationPrincipal PrincipalDto principal
-    ) {
-        List<Integer> ids = body.get("participantUserIds");
-        meetingService.inviteMoreParticipants(meetingId, ids, principal);
-        return ResponseEntity.ok(Map.of("message", "초대 완료"));
     }
 
     /**
@@ -180,10 +168,5 @@ public class MeetingController {
 
         return ResponseEntity.ok(dto);
     }
-    @GetMapping("/{meetingId}/participants")
-    public List<ParticipantResDto> getMeetingParticipants(
-            @PathVariable Integer meetingId
-    ) {
-        return meetingService.readParticipants(meetingId);
-    }
+
 }

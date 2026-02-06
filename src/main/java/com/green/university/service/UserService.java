@@ -6,7 +6,6 @@ import java.util.stream.Collectors;
 
 import com.green.university.dto.response.*;
 import com.green.university.repository.*;
-import com.green.university.repository.model.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -22,6 +21,9 @@ import com.green.university.dto.FindPasswordFormDto;
 import com.green.university.dto.LoginDto;
 import com.green.university.dto.UserUpdateDto;
 import com.green.university.handler.exception.CustomRestfullException;
+import com.green.university.repository.model.Staff;
+import com.green.university.repository.model.Student;
+import com.green.university.repository.model.User;
 import com.green.university.utils.Define;
 import com.green.university.utils.TempPassword;
 
@@ -43,8 +45,7 @@ public class UserService {
     private ProfessorJpaRepository professorJpaRepository;
     @Autowired
     private StudentJpaRepository studentJpaRepository;
-    @Autowired
-    private MeetingParticipantJpaRepository meetingParticipantJpaRepository;
+
     @Autowired
     private PasswordEncoder passwordEncoder;
     @Autowired
@@ -54,17 +55,14 @@ public class UserService {
 
     // 추가 JPA 레포지토리: 학과 조회에 사용
     @Autowired
-    private DepartmentJpaRepository departmentJpaRepository;
-
-    @Autowired
-    private AdvisorAssignmentService advisorAssignmentService;
+    private com.green.university.repository.DepartmentJpaRepository departmentJpaRepository;
 
 
     @Transactional
     public void createStaffToStaffAndUser(CreateStaffDto createStaffDto) {
         // JPA를 사용하여 staff를 생성하고 user_tb에 계정을 추가한다.
         // Staff 엔티티 구성
-        Staff staff = new Staff();
+        com.green.university.repository.model.Staff staff = new com.green.university.repository.model.Staff();
         staff.setName(createStaffDto.getName());
         staff.setBirthDate(createStaffDto.getBirthDate());
         staff.setGender(createStaffDto.getGender());
@@ -76,7 +74,7 @@ public class UserService {
         staff = staffJpaRepository.save(staff);
         Integer staffId = staff.getId();
         // User 엔티티 생성
-        User user = new User();
+        com.green.university.repository.model.User user = new com.green.university.repository.model.User();
         user.setId(staffId);
         user.setPassword(passwordEncoder.encode(staffId + ""));
         user.setUserRole("staff");
@@ -87,7 +85,7 @@ public class UserService {
     @Transactional
     public void createProfessorToProfessorAndUser(CreateProfessorDto createProfessorDto) {
         // JPA를 사용하여 professor를 생성하고 user_tb에 계정을 추가한다.
-        Professor professor = new Professor();
+        com.green.university.repository.model.Professor professor = new com.green.university.repository.model.Professor();
         professor.setName(createProfessorDto.getName());
         professor.setBirthDate(createProfessorDto.getBirthDate());
         professor.setGender(createProfessorDto.getGender());
@@ -97,7 +95,7 @@ public class UserService {
         // 교수는 학과에 소속되어야 하므로 deptId를 통해 Department 엔티티를 설정해야 한다.
         if (createProfessorDto.getDeptId() != null) {
             // Department JPA Repository를 통해 조회. 찾지 못하면 예외를 발생시키지 않고 null을 허용한다.
-            Department dept = null;
+            com.green.university.repository.model.Department dept = null;
             try {
                 dept = departmentJpaRepository.findById(createProfessorDto.getDeptId()).orElse(null);
             } catch (Exception e) {
@@ -111,7 +109,7 @@ public class UserService {
         professor = professorJpaRepository.save(professor);
         Integer professorId = professor.getId();
         // User 엔티티 생성
-        User user = new User();
+        com.green.university.repository.model.User user = new com.green.university.repository.model.User();
         user.setId(professorId);
         user.setPassword(passwordEncoder.encode(professorId + ""));
         user.setUserRole("professor");
@@ -123,7 +121,7 @@ public class UserService {
     public void createStudentToStudentAndUser(CreateStudentDto createStudentDto) {
         System.out.println("DEBUG Student DTO = " + createStudentDto);
         // JPA를 사용하여 학생을 생성하고 user_tb에 계정을 추가한다.
-        Student student = new Student();
+        com.green.university.repository.model.Student student = new com.green.university.repository.model.Student();
         student.setName(createStudentDto.getName());
         student.setBirthDate(createStudentDto.getBirthDate());
         student.setGender(createStudentDto.getGender());
@@ -132,7 +130,7 @@ public class UserService {
         student.setEmail(createStudentDto.getEmail());
         // 학과 설정
         if (createStudentDto.getDeptId() != null) {
-            Department dept = departmentJpaRepository.findById(createStudentDto.getDeptId()).orElse(null);
+            com.green.university.repository.model.Department dept = departmentJpaRepository.findById(createStudentDto.getDeptId()).orElse(null);
             student.setDepartment(dept);
             student.setDeptId(createStudentDto.getDeptId());
         }
@@ -148,14 +146,8 @@ public class UserService {
         // 학적 상태 생성 (재학)
         stuStatService.createFirstStatus(studentId);
 
-        try {
-            advisorAssignmentService.assignAdvisorToStudent(studentId);
-        } catch (Exception e) {
-            System.err.println("지도교수 배정 실패 (학생 생성은 완료): " + e.getMessage());
-        }
-
         // user 생성
-        User user = new User();
+        com.green.university.repository.model.User user = new com.green.university.repository.model.User();
         user.setId(studentId);
         user.setPassword(passwordEncoder.encode(studentId + ""));
         user.setUserRole("student");
@@ -182,7 +174,7 @@ public class UserService {
                     .orElse(null);
         } else if ("professor".equals(userRole)) {
             name = professorJpaRepository.findById(user.getId())
-                    .map(Professor::getName)
+                    .map(com.green.university.repository.model.Professor::getName)
                     .orElse(null);
         } else if ("staff".equals(userRole)) {
             name = staffJpaRepository.findById(user.getId())
@@ -223,7 +215,7 @@ public class UserService {
     }
 
     public UserInfoForUpdateDto readProfessorInfoForUpdate(Integer userId) {
-        Professor professor =
+        com.green.university.repository.model.Professor professor =
                 professorJpaRepository.findById(userId)
                         .orElseThrow(() -> new CustomRestfullException(
                                 "교수 정보를 찾을 수 없습니다.", HttpStatus.INTERNAL_SERVER_ERROR));
@@ -263,7 +255,7 @@ public class UserService {
 
     @Transactional
     public void updateProfessor(UserUpdateDto updateDto) {
-        Professor professor =
+        com.green.university.repository.model.Professor professor =
                 professorJpaRepository.findById(updateDto.getUserId())
                         .orElseThrow(() -> new CustomRestfullException(
                                 "교수 정보를 찾을 수 없습니다.", HttpStatus.INTERNAL_SERVER_ERROR));
@@ -326,7 +318,7 @@ public class UserService {
 
     @Transactional
     public ProfessorInfoDto readProfessorInfo(Integer id) {
-        Professor professor =
+        com.green.university.repository.model.Professor professor =
                 professorJpaRepository.findById(id)
                         .orElseThrow(() -> new CustomRestfullException(
                                 "교수 정보를 찾을 수 없습니다.", HttpStatus.INTERNAL_SERVER_ERROR));
@@ -351,7 +343,7 @@ public class UserService {
         } else if ("professor".equals(role)) {
             findId = professorJpaRepository
                     .findByNameAndEmail(dto.getName(), dto.getEmail())
-                    .map(Professor::getId)
+                    .map(com.green.university.repository.model.Professor::getId)
                     .orElse(null);
 
         } else if ("staff".equals(role)) {
@@ -391,7 +383,7 @@ public class UserService {
         } else if ("professor".equals(role)) {
             userId = professorJpaRepository
                     .findByIdAndNameAndEmail(dto.getId(), dto.getName(), dto.getEmail())
-                    .map(Professor::getId)
+                    .map(com.green.university.repository.model.Professor::getId)
                     .orElse(null);
 
         } else if ("staff".equals(role)) {
@@ -461,7 +453,7 @@ public class UserService {
 
     // 학생 정보 수정 (JPA)
     private void updateStudentProfileWithJpa(Integer userId, UserInfoForUpdateDto dto) {
-        Student student =
+        com.green.university.repository.model.Student student =
                 studentJpaRepository.findById(userId)
                         .orElseThrow(() -> new CustomRestfullException(
                                 "학생 정보를 찾을 수 없습니다.", HttpStatus.INTERNAL_SERVER_ERROR));
@@ -475,7 +467,7 @@ public class UserService {
 
     // 직원 정보 수정 (JPA)
     private void updateStaffProfileWithJpa(Integer userId, UserInfoForUpdateDto dto) {
-        Staff staff =
+        com.green.university.repository.model.Staff staff =
                 staffJpaRepository.findById(userId)
                         .orElseThrow(() -> new CustomRestfullException(
                                 "직원 정보를 찾을 수 없습니다.", HttpStatus.INTERNAL_SERVER_ERROR));
@@ -489,7 +481,7 @@ public class UserService {
 
     // 교수 정보 수정 (JPA)
     private void updateProfessorProfileWithJpa(Integer userId, UserInfoForUpdateDto dto) {
-        Professor professor =
+        com.green.university.repository.model.Professor professor =
                 professorJpaRepository.findById(userId)
                         .orElseThrow(() -> new CustomRestfullException(
                                 "교수 정보를 찾을 수 없습니다.", HttpStatus.INTERNAL_SERVER_ERROR));
@@ -522,7 +514,7 @@ public class UserService {
                     .orElse(null);
         } else if ("professor".equals(userRole)) {
             name = professorJpaRepository.findById(userId)
-                    .map(Professor::getName)
+                    .map(com.green.university.repository.model.Professor::getName)
                     .orElse(null);
         } else if ("staff".equals(userRole)) {
             name = staffJpaRepository.findById(userId)
@@ -567,7 +559,7 @@ public class UserService {
                     .orElse(null);
         } else if ("professor".equals(userRole)) {
             return professorJpaRepository.findById(userId)
-                    .map(Professor::getName)
+                    .map(com.green.university.repository.model.Professor::getName)
                     .orElse(null);
         } else if ("staff".equals(userRole)) {
             return staffJpaRepository.findById(userId)
@@ -589,7 +581,7 @@ public class UserService {
                     .orElse(null);
         } else if ("professor".equals(userRole)) {
             return professorJpaRepository.findById(userId)
-                    .map(Professor::getEmail)
+                    .map(com.green.university.repository.model.Professor::getEmail)
                     .orElse(null);
         } else if ("staff".equals(userRole)) {
             return staffJpaRepository.findById(userId)
@@ -603,86 +595,6 @@ public class UserService {
         return userJpaRepository.findById(userId)
                 .orElseThrow(() -> new CustomRestfullException(
                         "사용자 정보를 찾을 수 없습니다.", HttpStatus.INTERNAL_SERVER_ERROR));
-    }
-
-
-    @Transactional(readOnly = true)
-    public List<UserSearchItemResDto> searchUsersByRoleAndName(String role, String keyword, Integer meetingId) {
-        if (role == null || role.trim().isEmpty()) {
-            throw new CustomRestfullException("role 값이 필요합니다.", HttpStatus.BAD_REQUEST);
-        }
-
-        String r = role.trim().toLowerCase();
-        String q = (keyword == null) ? "" : keyword.trim();
-        if (q.length() < 2) return List.of();
-
-        // ✅ meetingId가 있으면, "이미 초대/참가 중"인 유저 id set 만들기
-        final java.util.Set<Integer> alreadySet;
-        if (meetingId == null) {
-            alreadySet = java.util.Set.of();
-        } else {
-            var ids = meetingParticipantJpaRepository.findUserIdsByMeetingIdAndStatusIn(
-                    meetingId,
-                    java.util.List.of("INVITED", "JOINED")
-            );
-            alreadySet = new java.util.HashSet<>(ids);
-        }
-
-        switch (r) {
-            case "student":
-                return studentJpaRepository.findByNameContainingIgnoreCaseOrderByNameAsc(q).stream()
-                        .map(s -> new UserSearchItemResDto(
-                                s.getId(), s.getName(), "student", s.getEmail(),
-                                alreadySet.contains(s.getId())
-                        ))
-                        .toList();
-
-            case "professor":
-                return professorJpaRepository.findByNameContainingIgnoreCaseOrderByNameAsc(q).stream()
-                        .map(p -> new UserSearchItemResDto(
-                                p.getId(), p.getName(), "professor", p.getEmail(),
-                                alreadySet.contains(p.getId())
-                        ))
-                        .toList();
-
-            case "staff":
-                return staffJpaRepository.findByNameContainingIgnoreCaseOrderByNameAsc(q).stream()
-                        .map(st -> new UserSearchItemResDto(
-                                st.getId(), st.getName(), "staff", st.getEmail(),
-                                alreadySet.contains(st.getId())
-                        ))
-                        .toList();
-
-            default:
-                throw new CustomRestfullException("지원하지 않는 role 입니다.", HttpStatus.BAD_REQUEST);
-        }
-    }
-
-
-    /**
-     * UserService.java에 이 메서드를 추가하세요
-     * 현재 사용자의 이메일 조회
-     */
-    @Transactional(readOnly = true)
-    public String getCurrentEmail(Integer userId, String userRole) {
-        if ("student".equals(userRole)) {
-            return studentJpaRepository.findById(userId)
-                    .map(Student::getEmail)
-                    .orElseThrow(() -> new CustomRestfullException(
-                            "학생 정보를 찾을 수 없습니다.", HttpStatus.INTERNAL_SERVER_ERROR));
-        } else if ("professor".equals(userRole)) {
-            return professorJpaRepository.findById(userId)
-                    .map(Professor::getEmail)
-                    .orElseThrow(() -> new CustomRestfullException(
-                            "교수 정보를 찾을 수 없습니다.", HttpStatus.INTERNAL_SERVER_ERROR));
-        } else if ("staff".equals(userRole)) {
-            return staffJpaRepository.findById(userId)
-                    .map(Staff::getEmail)
-                    .orElseThrow(() -> new CustomRestfullException(
-                            "직원 정보를 찾을 수 없습니다.", HttpStatus.INTERNAL_SERVER_ERROR));
-        } else {
-            throw new CustomRestfullException("지원하지 않는 사용자 유형입니다.", HttpStatus.BAD_REQUEST);
-        }
     }
 
 

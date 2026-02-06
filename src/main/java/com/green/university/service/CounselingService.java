@@ -42,9 +42,6 @@ public class CounselingService {
     @Autowired
     private MeetingService meetingService;
 
-    @Autowired
-    private NotificationService notificationService;
-
     // ============= 공통 유틸/검증 =============
 
 
@@ -340,89 +337,46 @@ public class CounselingService {
         slot.setUpdatedAt(Timestamp.valueOf(now));
         slotRepo.save(slot);
 
-        // 교수에게 알림 생성
-        String timeText = start.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
-        String memoText = (memo == null) ? "" : memo;
-
-        String message = String.format(
-                "%s 학생이 %s에 상담 예약을 신청했습니다. | 예약사유: %s",
-                student.getName(),
-                timeText,
-                memoText
-        );
-
-        notificationService.createNotification(
-                slot.getProfessor().getId(),
-                "RESERVATION_REQUEST",
-                message,
-                saved.getId()
-        );
-
         return toReservationDto(saved);
     }
 
     @Transactional
-    public void cancelReservation(PrincipalDto principal, Long reservationId, String reason) {
+    public void cancelReservation(PrincipalDto principal, Long reservationId) {
         validateStudent(principal);
 
         CounselingReservation r = findReservation(reservationId);
-
-        // 본인 예약만
         if (!r.getStudent().getId().equals(principal.getId())) {
             throw new CustomRestfullException("본인 예약만 취소 가능", HttpStatus.FORBIDDEN);
         }
 
-        CounselingSlot slot = r.getSlot();
-
         LocalDateTime now = LocalDateTime.now();
 
-        // 승인된(회의 연결된) 예약은 학생 취소 불가
-        if (r.getMeetingId() != null || (slot != null && slot.getMeetingId() != null)) {
+        // 교수님이 이미 승인해서 회의가 연결된 예약은 학생 취소 불가
+        if (r.getMeetingId() != null ||
+                (r.getSlot() != null && r.getSlot().getMeetingId() != null)) {
             throw new CustomRestfullException("이미 교수님이 승인한 예약은 직접 취소할 수 없습니다.", HttpStatus.BAD_REQUEST);
         }
 
-        // 지난 상담 취소 불가
-        if (slot.getStartAt().toLocalDateTime().isBefore(now)) {
+        if (r.getSlot().getStartAt().toLocalDateTime().isBefore(now)) {
             throw new CustomRestfullException("이미 지난 상담은 취소 불가", HttpStatus.BAD_REQUEST);
         }
 
-        // 이미 취소면 종료(멱등)
-        if (r.getStatus() == CounselingReservationStatus.CANCELED) return;
+        CounselingSlot slot = r.getSlot();
+        Long slotId = slot.getId();
 
-        // ✅ delete 금지: 상태로 남기기
-        r.setStatus(CounselingReservationStatus.CANCELED);
-        r.setCanceledAt(Timestamp.valueOf(now));
-        r.setUpdatedAt(Timestamp.valueOf(now));
-        reservationRepo.save(r);
+        // 1) 예약 삭제
+        reservationRepo.delete(r);
 
-        // 슬롯을 OPEN으로 되돌림(다른 RESERVED가 없을 때)
+        // 2) 이 슬롯에 아직 RESERVED 상태 예약이 남아있는지 체크
         boolean stillReserved = reservationRepo
-                .existsBySlot_IdAndStatus(slot.getId(), CounselingReservationStatus.RESERVED);
+                .existsBySlot_IdAndStatus(slotId, CounselingReservationStatus.RESERVED);
 
+        // 3) 하나도 없으면 슬롯 상태를 OPEN 으로 되돌림
         if (!stillReserved) {
             slot.setStatus(CounselingSlotStatus.OPEN);
             slot.setUpdatedAt(Timestamp.valueOf(now));
             slotRepo.save(slot);
         }
-
-        // ✅ 교수에게 알림 (학생 신청 알림과 같은 포맷)
-        String timeText = slot.getStartAt().toLocalDateTime()
-                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
-
-        String base = String.format("%s 학생이 %s에 상담 예약을 취소했습니다.",
-                r.getStudent().getName(), timeText);
-
-        String trimmed = (reason != null) ? reason.trim() : "";
-        String message = trimmed.isEmpty()
-                ? base
-                : base + " | 취소사유: " + trimmed;
-
-        notificationService.createNotification(
-                slot.getProfessor().getId(),
-                "RESERVATION_CANCELED_BY_STUDENT",
-                message,
-                r.getId()
-        );
     }
 
 
@@ -655,12 +609,9 @@ public class CounselingService {
             approveReq.setDescription("상담 예약으로 자동 생성된 회의입니다.");
         }
 
-        //  Timestamp → LocalDateTime
+        // 🔥 Timestamp → LocalDateTime
         approveReq.setStartAt(slot.getStartAt());
         approveReq.setEndAt(slot.getEndAt());
-
-        //  상담 승인 회의는 학생을 초대 대상으로 포함 (예약 회의 참여자 필수 규칙 대응)
-        approveReq.setParticipantUserIds(List.of(r.getStudent().getId()));
 
         MeetingSimpleResDto simpleResDto =
                 meetingService.createScheduledMeeting(approveReq, principal);
@@ -679,17 +630,11 @@ public class CounselingService {
         slot.setUpdatedAt(Timestamp.valueOf(now));
         slotRepo.save(slot);
 
-
-
-        // 학생에게 알림 생성
-        String message = String.format("%s 교수님이 %s에 상담 예약을 승인했습니다.",
-                slot.getProfessor().getName(),
-                slot.getStartAt().toLocalDateTime().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
-        notificationService.createNotification(
-                r.getStudent().getId(),
-                "RESERVATION_APPROVED",
-                message,
-                r.getId()
+        // 학생을 회의 참가자로 등록
+        meetingService.addGuestParticipant(
+                meetingId,
+                r.getStudent().getEmail(),
+                r.getStudent().getId()
         );
     }
 
@@ -700,7 +645,7 @@ public class CounselingService {
      * - 슬롯에 연결된 meetingId 가 있으면 Meeting도 취소 + meetingId 제거
      */
     @Transactional
-    public void cancelReservationByProfessor(PrincipalDto principal, Long reservationId, String reason) {
+    public void cancelReservationByProfessor(PrincipalDto principal, Long reservationId) {
         validateProfessor(principal);
 
         CounselingReservation r = findReservation(reservationId);
@@ -708,33 +653,40 @@ public class CounselingService {
 
         validateSlotOwnerOrAdmin(principal, slot);
 
+
+        // 이미 지난 상담은 취소 불가
         if (isPastSlot(slot)) {
             throw new CustomRestfullException("이미 지난 상담은 취소할 수 없습니다.", HttpStatus.BAD_REQUEST);
         }
 
         LocalDateTime now = LocalDateTime.now();
 
+        // 예약 상태 변경
         if (r.getStatus() == CounselingReservationStatus.CANCELED) {
+            // 이미 취소면 그냥 종료
             return;
         }
-
         r.setStatus(CounselingReservationStatus.CANCELED);
         r.setCanceledAt(Timestamp.valueOf(now));
         r.setUpdatedAt(Timestamp.valueOf(now));
         reservationRepo.save(r);
 
-        boolean stillReserved = reservationRepo.findBySlot_Id(slot.getId())
+        // 같은 슬롯에 아직 RESERVED 상태 예약이 남아 있는지 확인
+        boolean stillReserved = reservationRepo
+                .findBySlot_Id(slot.getId())
                 .stream()
                 .anyMatch(x -> x.getStatus() == CounselingReservationStatus.RESERVED);
 
         if (!stillReserved) {
             slot.setStatus(CounselingSlotStatus.OPEN);
 
+            // WebRTC Meeting 이 연결되어 있으면 같이 취소
             if (slot.getMeetingId() != null) {
                 try {
                     meetingService.cancelMeeting(slot.getMeetingId(), principal);
                 } catch (CustomRestfullException e) {
-                    // ignore or log
+                    // meeting 취소 실패해도 슬롯 상태 변경은 진행
+                    // 필요하면 로그만 남기고 무시
                 }
                 slot.setMeetingId(null);
             }
@@ -742,52 +694,5 @@ public class CounselingService {
             slot.setUpdatedAt(Timestamp.valueOf(now));
             slotRepo.save(slot);
         }
-
-        // ✅ reason을 알림 메시지에 포함
-        String base = String.format(
-                "%s 교수님이 %s에 예정된 상담 예약을 취소했습니다.",
-                slot.getProfessor().getName(),
-                slot.getStartAt().toLocalDateTime().format(
-                        java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
-                )
-        );
-
-        String trimmed = (reason != null) ? reason.trim() : "";
-        String message = base;
-        if (!trimmed.isEmpty()) {
-            message = base + "\n취소 사유: " + trimmed;
-        }
-
-        notificationService.createNotification(
-                r.getStudent().getId(),
-                "RESERVATION_CANCELED_BY_PROFESSOR",
-                message,
-                r.getId()
-        );
-    }
-
-
-
-    /**
-     * 교수-학생 간 완료된 상담 내역 조회 (슬롯 시간 기준)
-     */
-    @Transactional(readOnly = true)
-    public List<CounselingReservationResDto> getCompletedCounselingsByProfessorAndStudent(
-            Integer professorId,
-            Integer studentId
-    ) {
-        // 과거 시간대의 예약 중 APPROVED 상태인 것만 조회
-        LocalDateTime now = LocalDateTime.now();
-        Timestamp nowTs = Timestamp.valueOf(now);
-
-        List<CounselingReservation> reservations = reservationRepo
-                .findBySlot_Professor_IdAndStudent_IdAndStatusAndSlot_EndAtLessThanOrderBySlot_StartAtDesc(
-                        professorId,
-                        studentId,
-                        CounselingReservationStatus.APPROVED,
-                        nowTs
-                );
-
-        return mapReservationsToDtos(reservations);
     }
 }

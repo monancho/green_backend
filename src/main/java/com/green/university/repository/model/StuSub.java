@@ -51,7 +51,4 @@ public class StuSub {
 
     @Column(name = "complete_grade")
     private Integer completeGrade;
-
-    @Column(name = "enrollment_type", length = 20)
-    private String enrollmentType = "ENROLLED";
 }

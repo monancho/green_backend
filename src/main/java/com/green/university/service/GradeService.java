@@ -5,10 +5,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import com.green.university.repository.EvaluationJpaRepository;
 import com.green.university.repository.GradeJpaRepository;
 import com.green.university.repository.StuSubJpaRepository;
-import com.green.university.repository.model.Evaluation;
 import com.green.university.repository.model.Grade;
 import com.green.university.repository.model.StuSub;
 import com.green.university.repository.model.Subject;
@@ -30,9 +28,6 @@ public class GradeService {
 
     @Autowired
     private StuSubJpaRepository stuSubJpaRepository;
-
-    @Autowired
-    private EvaluationJpaRepository evaluationJpaRepository;
 
     // 학생이 수강한 연도 조회
     @Transactional(readOnly = true)
@@ -62,7 +57,7 @@ public class GradeService {
     @Transactional(readOnly = true)
     public List<GradeDto> readThisSemesterByStudentId(Integer studentId) {
         List<StuSub> stuSubs = stuSubJpaRepository.findByStudentIdAndSubject_SubYearAndSubject_Semester(
-                studentId, Define.getCurrentYear(), Define.getCurrentSemester());
+                studentId, Define.CURRENT_YEAR, Define.CURRENT_SEMESTER);
 
         return stuSubs.stream()
                 .map(this::convertToGradeDto)
@@ -73,7 +68,7 @@ public class GradeService {
     @Transactional(readOnly = true)
     public MyGradeDto readMyGradeByStudentId(Integer studentId) {
         List<StuSub> stuSubs = stuSubJpaRepository.findByStudentIdAndSubject_SubYearAndSubject_Semester(
-                studentId, Define.getCurrentYear(), Define.getCurrentSemester());
+                studentId, Define.CURRENT_YEAR, Define.CURRENT_SEMESTER);
 
         double avgGrade = stuSubs.stream()
                 .filter(ss -> ss.getGrade() != null)
@@ -88,8 +83,8 @@ public class GradeService {
 
         MyGradeDto myGradeDto = new MyGradeDto();
         myGradeDto.setStudentId(studentId);
-        myGradeDto.setSubYear(Define.getCurrentYear());
-        myGradeDto.setSemester(Define.getCurrentSemester());
+        myGradeDto.setSubYear(Define.CURRENT_YEAR);
+        myGradeDto.setSemester(Define.CURRENT_SEMESTER);
         myGradeDto.setAverage((float) avgGrade);
         myGradeDto.setMyGrades(sumGrades);
         // sumGrades는 이수해야 할 학점이므로 Subject의 grades 합계 필요
@@ -182,7 +177,6 @@ public class GradeService {
         List<StuSub> stuSubs = stuSubJpaRepository.findByStudentIdAndSubject_SubYearAndSubject_Semester(
                 studentId, subYear, semester);
 
-
         double avgGrade = stuSubs.stream()
                 .filter(ss -> ss.getGrade() != null)
                 .mapToDouble(ss -> convertGradeToValue(ss.getGrade()))
@@ -206,28 +200,8 @@ public class GradeService {
         dto.setName(subject != null ? subject.getName() : null);
         dto.setType(subject != null ? subject.getType() : null);
         dto.setGrade(stuSub.getGrade());
-
-        // 이수학점 설정 - Subject의 grades 사용 (수정!)
-        dto.setGrades(subject != null ? String.valueOf(subject.getGrades()) : null);
-
+        dto.setGrades(stuSub.getCompleteGrade() != null ? String.valueOf(stuSub.getCompleteGrade()) : null);
         dto.setGradeValue(stuSub.getGrade() != null ? String.valueOf(convertGradeToValue(stuSub.getGrade())) : null);
-
-        // 강의평가 여부 확인
-        Evaluation evaluation = evaluationJpaRepository
-                .findByStudentIdAndSubjectId(stuSub.getStudentId(), stuSub.getSubjectId())
-                .orElse(null);
-        dto.setEvaluationId(evaluation != null ? evaluation.getEvaluationId() : null);
-
-        if (evaluation != null) {
-            dto.setGrade(stuSub.getGrade());
-            dto.setGrades(subject != null ? String.valueOf(subject.getGrades()) : null);
-            dto.setGradeValue(stuSub.getGrade() != null ? String.valueOf(convertGradeToValue(stuSub.getGrade())) : null);
-        } else {
-            // 강의평가 미완료시 성적 숨김
-            dto.setGrade(null);
-            dto.setGrades(subject != null ? String.valueOf(subject.getGrades()) : null);
-            dto.setGradeValue(null);
-        }
 
         return dto;
     }

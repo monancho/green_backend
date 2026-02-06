@@ -84,7 +84,7 @@ public class TuitionController {
                 .readCollById(collegeService.readDeptById(studentInfo.getDeptId()).getCollege().getId()).getName();
 
         Tuition tuitionEntity = tuitionService.readByStudentIdAndSemester(
-                principal.getId(), Define.getCurrentYear(), Define.getCurrentSemester());
+                principal.getId(), Define.CURRENT_YEAR, Define.CURRENT_SEMESTER);
 
         if (tuitionEntity == null) {
             throw new CustomRestfullException("등록금 납부 기간이 아닙니다.", HttpStatus.BAD_REQUEST);

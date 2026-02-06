@@ -1,6 +1,5 @@
 package com.green.university.repository.model;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 
 import java.sql.Timestamp;
@@ -34,7 +33,7 @@ public class Notice {
     private Timestamp createdTime;
 
     // 공지사항에 첨부된 파일 목록 (1:N 관계)
-    @OneToMany(mappedBy = "notice", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    @OneToMany(mappedBy = "notice", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<NoticeFile> files;
 
     // 첫 번째 첨부 이미지의 경로를 반환합니다.
