@@ -3,9 +3,12 @@ package com.green.university.repository;
 import java.util.List;
 import java.util.Optional;
 
+import com.green.university.enums.MeetingStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import com.green.university.repository.model.MeetingParticipant;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface MeetingParticipantJpaRepository extends JpaRepository<MeetingParticipant, Integer> {
 
@@ -23,4 +26,32 @@ public interface MeetingParticipantJpaRepository extends JpaRepository<MeetingPa
 
     // 해당 회의에 아직 JOINED 상태인 사람이 있는지 여부
     boolean existsByMeeting_IdAndStatus(Integer meetingId, String status);
+
+    List<MeetingParticipant> findByMeeting_IdAndStatus(Integer meetingId, String status);
+
+    @Query("""
+select mp
+from MeetingParticipant mp
+where mp.user.id = :userId
+  and mp.meeting.endAt > :now
+  and mp.meeting.status in :statuses
+order by mp.meeting.startAt desc
+""")
+    List<MeetingParticipant> findMyActiveOrScheduledMeetings(
+            @Param("userId") Integer userId,
+            @Param("now") java.sql.Timestamp now,
+            @Param("statuses") List<MeetingStatus> statuses
+    );
+
+    @Query("""
+select mp.user.id
+from MeetingParticipant mp
+where mp.meeting.id = :meetingId
+  and mp.status in :statuses
+""")
+    List<Integer> findUserIdsByMeetingIdAndStatusIn(
+            @Param("meetingId") Integer meetingId,
+            @Param("statuses") List<String> statuses
+    );
+
 }
